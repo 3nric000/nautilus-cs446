@@ -77,6 +77,7 @@ typedef struct nk_fiber_percpu_state {
     nk_fiber_t *curr_fiber;
     nk_fiber_t *idle_fiber;
     struct list_head f_sched_queue;
+    struct nk_wait_queue *waitq;
 } fiber_state;
   
 extern void nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
@@ -314,14 +315,12 @@ static int _nk_fiber_yield_to(nk_fiber_t *f_to)
 {
   // Get the current fiber
   nk_fiber_t *f_from = nk_fiber_current();
- 
   _LOCK_FIBER(f_from); 
   // If a fiber is not waiting or exiting, change its status to yielding
   if (f_from->f_status != WAIT && f_from->f_status != EXIT) {
     f_from->f_status = YIELD;
   }
   fiber_state *state = _GET_FIBER_STATE();
-  
   // Enqueue the current fiber (if not on wait queue)
   if (!(f_from->is_idle) && f_from->f_status != WAIT) {
     _LOCK_SCHED_QUEUE(state);
@@ -394,6 +393,24 @@ static int _nk_initial_placement()
     return (int)(_get_random() % sys->num_cpus);
 }
 
+int _wake_fiber_thread(fiber_state *state)
+{
+  #if NAUT_CONFIG_ENABLE_SLEEP
+  nk_thread_t *curr_thread = get_cur_thread();
+  // Wake up fiber thread if it is sleeping (so it can schedule & run fibers)
+  if (curr_thread->timer){
+    //DEBUG: Prints info whenever a fiber thread is awakened
+    FIBER_DEBUG("nk_fiber_run() : waking fiber thread\n");
+    FIBER_DEBUG("nk_fiber_run() : curr_thread = %p named %s, timer = %p named %s, cpu = %d \n", curr_thread, curr_thread->name, curr_thread->timer, curr_thread->timer->name, curr_thread->current_cpu);
+    nk_timer_cancel(curr_thread->timer);
+  }
+  #endif
+  #if NAUT_CONFIG_ENABLE_WAIT 
+  nk_wait_queue_wake_one_extended(state->waitq, 1);
+  #endif
+  return 0;
+}
+
 static nk_thread_t *_get_random_fiber_thread()
 {
   // Picks a random CPU and returns that CPU's fiber thread
@@ -433,10 +450,11 @@ static struct nk_fiber_percpu_state *init_local_fiber_state()
 	memset(state, 0, sizeof(struct nk_fiber_percpu_state));
     
     spinlock_init(&(state->lock));
-   
-    // Promote to fiber thread
+     
     INIT_LIST_HEAD(&(state->f_sched_queue));
     
+    state->waitq = nk_wait_queue_create("fib");
+ 
     return state;
 
  fail_free:
@@ -495,6 +513,7 @@ static void __nk_fiber_idle(void *in, void **out)
     #ifdef NAUT_CONFIG_ENABLE_SPIN
     nk_fiber_yield();
     #endif
+
     // If we have fiber thread sleep enabled
     #ifdef NAUT_CONFIG_ENABLE_SLEEP  
     nk_fiber_yield();
@@ -510,9 +529,9 @@ static void __nk_fiber_idle(void *in, void **out)
     // up when nk_fiber_run is called
     #ifdef NAUT_CONFIG_ENABLE_WAIT
     nk_fiber_yield();
-    if (list_empty_careful(_GET_SCHED_HEAD())){
+    if (list_empty_careful(_GET_SCHED_HEAD()) && _GET_FIBER_STATE()->curr_fiber->is_idle){
       FIBER_DEBUG("nk_fiber_idle() : fiber thread waiting on more fibers\n");
-      nk_sleep(NAUT_CONFIG_FIBER_THREAD_SLEEP_TIME);
+      nk_wait_queue_sleep(_GET_FIBER_STATE()->waitq);
       FIBER_DEBUG("nk_fiber-idle() : fiber thread waking up\n");
     }
     #endif 
@@ -703,8 +722,9 @@ int nk_fiber_run(nk_fiber_t *f, int target_cpu)
       t_cpu = target_cpu;
     }
   
-  // Enqueues the fiber into the chosen fiber thread's queue.
   fiber_state *state = sys->cpus[curr_thread->current_cpu]->f_state;
+  _wake_fiber_thread(state); 
+  // Enqueues the fiber into the chosen fiber thread's queue.
   //struct list_head *fiber_sched_queue = &(sys->cpus[curr_thread->current_cpu]->f_state->f_sched_queue);
  
   //DEBUG: Prints the fiber that is about to be enqueued and the CPU it will be enqueued on
@@ -716,15 +736,6 @@ int nk_fiber_run(nk_fiber_t *f, int target_cpu)
   list_add_tail(&(f->sched_node), &(state->f_sched_queue));
   _UNLOCK_FIBER(f);
   _UNLOCK_SCHED_QUEUE(state);
-
-  // TODO MAC: Factor out waking of fiber thread into separate function
-  // Wake up fiber thread if it is sleeping (so it can schedule & run fibers)
-  if (curr_thread->timer){
-    //DEBUG: Prints info whenever a fiber thread is awakened
-    FIBER_DEBUG("nk_fiber_run() : waking fiber thread\n");
-    FIBER_DEBUG("nk_fiber_run() : curr_thread = %p named %s, timer = %p named %s, cpu = %d \n", curr_thread, curr_thread->name, curr_thread->timer, curr_thread->timer->name, curr_thread->current_cpu);
-    nk_timer_cancel(curr_thread->timer);
-  }
 
   return 0;
 }

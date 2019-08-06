@@ -63,7 +63,7 @@ void fiber_outer(void *i, void **o)
   while(a < 3){
     nk_vc_printf("Fiber outer a = %d\n", a++);
     nk_fiber_t *f_inner;
-    nk_fiber_start(fiber_inner, 0, 0, 0, 1, &f_inner);
+    nk_fiber_start(fiber_inner, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f_inner);
     nk_fiber_yield();
   }
   nk_vc_printf("Fiber outer is finished, a = %d\n", a);
@@ -118,7 +118,7 @@ void fiber3(void *i, void **o)
   }
   nk_vc_printf("Fiber 3 is finished, a = %d\n", a);
   nk_fiber_t *f4;
-  nk_fiber_start(fiber4, 0, 0, 0, 1, &f4);
+  nk_fiber_start(fiber4, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f4);
 }
 
 void fiber1(void *i, void **o)
@@ -131,7 +131,7 @@ void fiber1(void *i, void **o)
   }
   nk_vc_printf("Fiber 1 is finished, a = %d\n", a);
   nk_fiber_t *f3;
-  nk_fiber_start(fiber3, 0, 0, 0, 1, &f3);
+  nk_fiber_start(fiber3, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f3);
 }
 
 
@@ -145,7 +145,7 @@ void fiber2(void *i, void **o)
   }
   nk_vc_printf("Fiber 2 is finished, a = %d\n", a);
   nk_fiber_t *f4;
-  nk_fiber_start(fiber4, 0, 0, 0, 1, &f4);
+  nk_fiber_start(fiber4, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f4);
 }
 
 void print_even(void *i, void **o){
@@ -277,7 +277,7 @@ void fiber_routine1(void *i, void **o)
     nk_fiber_t *curr = NULL;
     if(f_new){
       nk_fiber_t *new;
-      nk_fiber_start(fiber_routine2, 0, 0, 0, 0, &new);
+      nk_fiber_start(fiber_routine2, 0, 0, 0, FIBER_RAND_CPU_FLAG, &new);
       break;
     }
     nk_vc_printf("fiber_routine1() : This is the %d iteration of fiber %p\n", a++, curr);
@@ -337,8 +337,8 @@ int test_fibers_counter(){
   nk_fiber_t *even;
   nk_fiber_t *odd;
   vc = get_cur_thread()->vc;
-  nk_fiber_start(print_even, 0, 0, 0, 1, &even);
-  nk_fiber_start(print_odd, 0, 0, 0, 1, &odd);
+  nk_fiber_start(print_even, 0, 0, 0, FIBER_RAND_CPU_FLAG, &even);
+  nk_fiber_start(print_odd, 0, 0, 0, FIBER_RAND_CPU_FLAG, &odd);
 
   return 0;
 }
@@ -348,7 +348,7 @@ int test_nested_fibers()
   nk_fiber_t *f_outer;
   vc = get_cur_thread()->vc;
   nk_vc_printf("test_nested_fibers() : virtual console %p\n", vc);
-  nk_fiber_start(fiber_outer, 0, 0, 0, 1, &f_outer);
+  nk_fiber_start(fiber_outer, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f_outer);
   return 0;
 }
 
@@ -359,9 +359,9 @@ int test_fibers()
   nk_fiber_t *f3;
   vc = get_cur_thread()->vc;
   nk_vc_printf("test_fibers() : virtual console %p\n", vc);
-  nk_fiber_start(fiber1, 0, 0, 0, 1, &f1);
-  nk_fiber_start(fiber2, 0, 0, 0, 1, &f2);
-  nk_fiber_start(fiber3, 0, 0, 0, 1, &f3);
+  nk_fiber_start(fiber1, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f1);
+  nk_fiber_start(fiber2, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f2);
+  nk_fiber_start(fiber3, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f3);
   return 0;
 }
 
@@ -373,10 +373,10 @@ int test_yield_to()
   nk_fiber_t *f_fourth;
   vc = get_cur_thread()->vc;
   nk_vc_printf("test_yield_to() : virtual console %p\n", vc);
-  nk_fiber_create(fiber_fourth, 0, 0, 0, &f_fourth);
-  nk_fiber_create(fiber_first, 0, 0, 0, &f_first);
-  nk_fiber_create(fiber_third, 0, 0, 0, &f_third);
-  nk_fiber_create(fiber_second, 0, 0, 0, &f_second);
+  nk_fiber_create(fiber_fourth, 0, 0, FIBER_CURR_CPU_FLAG, &f_fourth);
+  nk_fiber_create(fiber_first, 0, 0, FIBER_CURR_CPU_FLAG, &f_first);
+  nk_fiber_create(fiber_third, 0, 0, FIBER_CURR_CPU_FLAG, &f_third);
+  nk_fiber_create(fiber_second, 0, 0, FIBER_CURR_CPU_FLAG, &f_second);
   //void *input[4] = {&f_first, &f_second, &f_third, &f_fourth};
   f_first->input = f_second;
   f_second->input = f_third;
@@ -394,7 +394,7 @@ int test_fiber_join()
   nk_fiber_t *f_outer_join;
   vc = get_cur_thread()->vc;
   nk_vc_printf("test_fiber_join() : virtual console %p\n", vc);
-  nk_fiber_start(fiber_outer_join, 0, 0, 0, 1, &f_outer_join);
+  nk_fiber_start(fiber_outer_join, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f_outer_join);
   return 0;
 }
 
@@ -403,7 +403,7 @@ int test_fiber_fork()
   nk_fiber_t *f_orig;
   vc = get_cur_thread()->vc;
   nk_vc_printf("test_fiber_fork() : virtual console %p\n", vc);
-  nk_fiber_start(fiber_fork, 0, 0, 0, 1, &f_orig);
+  nk_fiber_start(fiber_fork, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f_orig);
   return 0;
 }
 
@@ -412,7 +412,7 @@ int test_fiber_fork_join()
   nk_fiber_t *f_orig;
   vc = get_cur_thread()->vc;
   nk_vc_printf("test_fiber_fork_join() : virtual console %p\n", vc);
-  nk_fiber_start(fiber_fork_join, 0, 0, 0, 1, &f_orig);
+  nk_fiber_start(fiber_fork_join, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f_orig);
   return 0;
 }
 
@@ -421,7 +421,7 @@ int test_fiber_routine()
   nk_fiber_t *f_orig;
   vc = get_cur_thread()->vc;
   nk_vc_printf("test_fiber_routine() : virtual console %p\n", vc);
-  nk_fiber_start(fiber_routine1, 0, 0, 0, 1, &f_orig);
+  nk_fiber_start(fiber_routine1, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f_orig);
   return 0;
 }
 
@@ -430,7 +430,7 @@ int test_fiber_routine_2()
   nk_fiber_t *f_orig;
   vc = get_cur_thread()->vc;
   nk_vc_printf("test_fiber_routine_2() : virtual console %p\n", vc);
-  nk_fiber_start(fiber_routine3, 0, 0, 0, 1, &f_orig);
+  nk_fiber_start(fiber_routine3, 0, 0, 0, FIBER_RAND_CPU_FLAG, &f_orig);
   return 0;
 }
 
@@ -439,8 +439,8 @@ int test_fiber_timing(){
   nk_fiber_t *second;
   vc = get_cur_thread()->vc;
   
-  nk_fiber_start(first_timer, 0, 0, 0, 1, &first);
-  nk_fiber_start(second_timer, 0, 0, 0, 1, &second);
+  nk_fiber_start(first_timer, 0, 0, 0, FIBER_RAND_CPU_FLAG, &first);
+  nk_fiber_start(second_timer, 0, 0, 0, FIBER_RAND_CPU_FLAG, &second);
 
   return 0;
 }

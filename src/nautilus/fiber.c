@@ -52,7 +52,7 @@
 #define FIBER_WARN(fmt, args...)  WARN_PRINT("fiber: " fmt, ##args)
 #define ERROR(fmt, args...) ERROR_PRINT("fiber: " fmt, ##args)
 
-#define FIBER_THREAD_STACK_SIZE (PAGE_SIZE_2MB)
+#define FIBER_THREAD_STACK_SIZE NAUT_CONFIG_FIBER_THREAD_STACK_SIZE
 #define LAUNCHPAD 16
 #define STACK_CLONE_DEPTH 2
 #define GPR_RAX_OFFSET 0x70
@@ -351,7 +351,7 @@ static int _nk_fiber_yield_to(nk_fiber_t *f_to)
   f_to->curr_cpu = my_cpu_id();
   f_to->f_status = RUN;
   if (f_to->is_idle) {
-    FIBER_INFO("Idle Fiber Switched to\n");
+    FIBER_DEBUG("_nk_fiber_yield_to() : Switched to idle fiber on CPU %d\n", my_cpu_id());
   }
   _UNLOCK_FIBER(f_from);
   _UNLOCK_FIBER(f_to);
@@ -406,7 +406,7 @@ int _wake_fiber_thread(fiber_state *state)
   }
   #endif
   #if NAUT_CONFIG_ENABLE_WAIT 
-  // TODO MAC: Small change made to stop panic
+  // TODO MAC: Small change made to stop panic MIGHT NOT BE NEEDED
   if (!(list_empty_careful(&(state->waitq->list)))) {
     nk_wait_queue_wake_one_extended(state->waitq, 1);
   }
@@ -781,13 +781,17 @@ int nk_fiber_yield()
   return _nk_fiber_yield_to(f_to);
 }
 
-int nk_fiber_yield_to(nk_fiber_t *f_to)
+int nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag)
 {
   // Remove f_to from its respective fiber queue (need to check all CPUs)
   // This is currently not safe, fiber may be running and therefore not in sched queue
   if (!(_check_yield_to(f_to))){
     //DEBUG: Will indicate whether the fiber we're attempting to yield to was not found
     FIBER_DEBUG("nk_fiber_yield_to() : Failed to find fiber in queues :(\n");
+    if (earlyRetFlag) {
+      FIBER_DEBUG("nk_fiber_yield_to() : early ret flag set, returning early\n");
+      return -1;
+    }
     
     nk_fiber_t *new_to = _rr_policy();
 
@@ -824,7 +828,7 @@ int nk_fiber_conditional_yield(uint8_t (*cond_function)(void *param), void *stat
 int nk_fiber_conditional_yield_to(nk_fiber_t *fib, uint8_t (*cond_function)(void *param), void *state)
 {
   if (cond_function(state)){
-    return nk_fiber_yield_to(fib);
+    return nk_fiber_yield_to(fib, 0);
   }
   return 1;
 }

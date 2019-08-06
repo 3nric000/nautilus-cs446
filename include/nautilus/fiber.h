@@ -44,6 +44,7 @@ typedef uint64_t nk_stack_size_t;
 typedef struct nk_thread nk_thread_t;
 #define FIBER_RAND_CPU_FLAG -2
 #define FIBER_CURR_CPU_FLAG -1
+#define YIELD_TO_EARLY_RET 1
 
 /* common thread stack sizes */
 #define FSTACK_DEFAULT 0 // will be 4K
@@ -129,7 +130,7 @@ int nk_fiber_yield();
 
 // Yield that allows choice of fiber to yield to
 // Will yield to a random fiber if f_to is not available to yield to
-int nk_fiber_yield_to(nk_fiber_t *f_to);
+int nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag);
 
 // Takes a fiber to yield to, a condition to yield on, and a function to check that condition
 // returns 1 if the fiber does not yield

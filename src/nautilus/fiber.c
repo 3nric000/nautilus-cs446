@@ -315,43 +315,48 @@ static int _nk_fiber_yield_to(nk_fiber_t *f_to)
   // Get the current fiber
   nk_fiber_t *f_from = nk_fiber_current();
  
+  _LOCK_FIBER(f_from); 
   // If a fiber is not waiting or exiting, change its status to yielding
   if (f_from->f_status != WAIT && f_from->f_status != EXIT) {
     f_from->f_status = YIELD;
   }
+  fiber_state *state = _GET_FIBER_STATE();
   
   // Enqueue the current fiber (if not on wait queue)
   if (!(f_from->is_idle) && f_from->f_status != WAIT) {
+    _LOCK_SCHED_QUEUE(state);
     // Gets the sched queue for the current CPU
-    struct list_head *fiber_sched_queue = _GET_SCHED_HEAD();
-    
+    struct list_head *fiber_sched_queue = &(state->f_sched_queue);
+     
     // DEBUG: Prints the fiber that's about to be enqueued
     FIBER_DEBUG("nk_fiber_yield() : About to enqueue fiber: %p \n", f_from);
     
     // Adds fiber we're switching away from to the current CPU's fiber queue
     list_add_tail(&(f_from->sched_node), fiber_sched_queue);
+    f_from->f_status = READY;
     f_from->curr_cpu = my_cpu_id();
+    _UNLOCK_SCHED_QUEUE(state);
   }
   
   // Context switch (register saving and stack change)
-  _GET_FIBER_STATE()->curr_fiber = f_to;
+  state->curr_fiber = f_to;
   // Change the vc of the current thread if we aren't switching away from the idle fiber
   // TODO: MAC: Might not do what I think it does
   if (!f_from->is_idle){ 
     nk_fiber_set_vc(f_from->vc);
   }
-  
   // Change Status of to and from fibers
   // TODO MAC: Don't change if f_from is waiting
 
-  f_from->f_status = READY;
+  _LOCK_FIBER(f_to);
   f_to->curr_cpu = my_cpu_id();
   f_to->f_status = RUN;
   if (f_to->is_idle) {
     FIBER_INFO("Idle Fiber Switched to\n");
   }
+  _UNLOCK_FIBER(f_from);
+  _UNLOCK_FIBER(f_to);
   nk_fiber_context_switch(f_from, f_to);
-
   return 0;
 }
 
@@ -686,24 +691,31 @@ int nk_fiber_run(nk_fiber_t *f, int target_cpu)
   //if target_cpu <= -2 (or is invalid target_cpu), the fiber will be placed on a random fiber thread's queue
   struct sys_info * sys = per_cpu_get(system);
   int num_cpus = sys->num_cpus;
+  int t_cpu = target_cpu;
   // by default curr_thread is set to the current cpu's  fiber thread
   nk_thread_t *curr_thread = _GET_FIBER_THREAD();
   if (target_cpu <= FIBER_RAND_CPU_FLAG || target_cpu > num_cpus) {
     curr_thread = _get_random_fiber_thread();
-    f->curr_cpu = curr_thread->current_cpu;
+    t_cpu = curr_thread->current_cpu;
   } else if(target_cpu != FIBER_CURR_CPU_FLAG) {
       //curr_thread is is set to the fiber thread of target_cpu
       curr_thread = sys->cpus[target_cpu]->f_state->fiber_thread;
-      f->curr_cpu = target_cpu;
+      t_cpu = target_cpu;
     }
   
   // Enqueues the fiber into the chosen fiber thread's queue.
-  struct list_head *fiber_sched_queue = &(sys->cpus[curr_thread->current_cpu]->f_state->f_sched_queue);
+  fiber_state *state = sys->cpus[curr_thread->current_cpu]->f_state;
+  //struct list_head *fiber_sched_queue = &(sys->cpus[curr_thread->current_cpu]->f_state->f_sched_queue);
  
   //DEBUG: Prints the fiber that is about to be enqueued and the CPU it will be enqueued on
   FIBER_DEBUG("nk_fiber_run() : about to enqueue a fiber: %p on cpu: %d\n", f, curr_thread->current_cpu); 
+  _LOCK_FIBER(f);
+  t_cpu = target_cpu;
   f->f_status = READY; 
-  list_add_tail(&(f->sched_node), fiber_sched_queue);
+  _LOCK_SCHED_QUEUE(state);
+  list_add_tail(&(f->sched_node), &(state->f_sched_queue));
+  _UNLOCK_FIBER(f);
+  _UNLOCK_SCHED_QUEUE(state);
 
   // TODO MAC: Factor out waking of fiber thread into separate function
   // Wake up fiber thread if it is sleeping (so it can schedule & run fibers)
@@ -914,18 +926,19 @@ int nk_fiber_join(nk_fiber_t *wait_on)
   // MAC TODO: Should check if wait_on is a valid fiber? But how?
 
   // Adds curr_fiber to wait_on's wait queue
-  // Not safe, need to lock before we enqueue
+  _LOCK_FIBER(wait_on);
   if (wait_on->is_done || wait_on->f_status == EXIT){
     FIBER_INFO("nk_fiber_join() : tried to join a thread which is finshed or exiting\n");
+    _UNLOCK_FIBER(wait_on);
     return -1;
   }
-
   wait_on->curr_cpu = -1;
   struct list_head *wait_q = &(wait_on->wait_queue);
   list_add_tail(&(curr_fiber->wait_node), wait_q);
   wait_on->num_wait++;
   curr_fiber->f_status = WAIT;
-  
+  _UNLOCK_FIBER(wait_on);
+ 
   // Handled by special case in fiber yield
   // TODO: Could also attempt to yield directy to wait_on (might speed up wait time)?
   return nk_fiber_yield();

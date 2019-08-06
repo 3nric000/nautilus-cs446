@@ -62,17 +62,17 @@
 #define _NK_IDLE_FIBER() get_cpu()->f_state->idle_fiber
 #define _GET_FIBER_THREAD() get_cpu()->f_state->fiber_thread
 #define _GET_SCHED_HEAD() &(get_cpu()->f_state->f_sched_queue)
-#define _GET_SCHED_QUEUE_LOCK() get_cpu()->f_state->lock
-#define _GET_FIBER_LOCK(f) f->lock
+#define _GET_SCHED_QUEUE_LOCK() &(get_cpu()->f_state->lock)
+#define _GET_FIBER_LOCK(f) &(f->lock)
 
 /* Macros for locking and unlocking fibers */
-#define _LOCK_SCHED_QUEUE(state) spin_lock(state->lock) 
-#define _UNLOCK_SCHED_QUEUE(state) spin_unlock(state->lock) 
+#define _LOCK_SCHED_QUEUE(state) spin_lock(&(state->lock)) 
+#define _UNLOCK_SCHED_QUEUE(state) spin_unlock(&(state->lock)) 
 #define _LOCK_FIBER(f) spin_lock(_GET_FIBER_LOCK(f))
 #define _UNLOCK_FIBER(f) spin_unlock(_GET_FIBER_LOCK(f))
 
 typedef struct nk_fiber_percpu_state {
-    spinlock_t  *lock;
+    spinlock_t  lock;
     nk_thread_t *fiber_thread;
     nk_fiber_t *curr_fiber;
     nk_fiber_t *idle_fiber;
@@ -321,7 +321,7 @@ static int _nk_fiber_yield_to(nk_fiber_t *f_to)
   }
   
   // Enqueue the current fiber (if not on wait queue)
-  if (f_from != _NK_IDLE_FIBER() && f_from->f_status != WAIT) {
+  if (!(f_from->is_idle) && f_from->f_status != WAIT) {
     // Gets the sched queue for the current CPU
     struct list_head *fiber_sched_queue = _GET_SCHED_HEAD();
     
@@ -340,10 +340,16 @@ static int _nk_fiber_yield_to(nk_fiber_t *f_to)
   if (!f_from->is_idle){ 
     nk_fiber_set_vc(f_from->vc);
   }
-  // Change 
+  
+  // Change Status of to and from fibers
+  // TODO MAC: Don't change if f_from is waiting
+
   f_from->f_status = READY;
   f_to->curr_cpu = my_cpu_id();
   f_to->f_status = RUN;
+  if (f_to->is_idle) {
+    FIBER_INFO("Idle Fiber Switched to\n");
+  }
   nk_fiber_context_switch(f_from, f_to);
 
   return 0;
@@ -402,10 +408,10 @@ static int _check_yield_to(nk_fiber_t *to_del){
      return 0;
   } else {
       fiber_state *state = per_cpu_get(system)->cpus[to_del->curr_cpu]->f_state;
-      //_LOCK_SCHED_QUEUE(state);
+      _LOCK_SCHED_QUEUE(state);
       list_del_init(&(to_del->sched_node));
-      //_UNLOCK_SCHED_QUEUE(state);
       _UNLOCK_FIBER(to_del);
+      _UNLOCK_SCHED_QUEUE(state);
       return 1;
   }
 }
@@ -421,7 +427,7 @@ static struct nk_fiber_percpu_state *init_local_fiber_state()
 	
 	memset(state, 0, sizeof(struct nk_fiber_percpu_state));
     
-    spinlock_init(state->lock);
+    spinlock_init(&(state->lock));
    
     // Promote to fiber thread
     INIT_LIST_HEAD(&(state->f_sched_queue));
@@ -484,7 +490,6 @@ static void __nk_fiber_idle(void *in, void **out)
     #ifdef NAUT_CONFIG_ENABLE_SPIN
     nk_fiber_yield();
     #endif
-
     // If we have fiber thread sleep enabled
     #ifdef NAUT_CONFIG_ENABLE_SLEEP  
     nk_fiber_yield();
@@ -539,7 +544,7 @@ static void __fiber_thread(void *in, void **out)
     ERROR("Failed to get current fiber state\n");
   }
   state->fiber_thread = get_cur_thread();
-  
+ 
   // Starting the idle fiber
   nk_fiber_t *idle_fiber_ptr;
   if (nk_fiber_create(__nk_fiber_idle, 0, 0, 0, &idle_fiber_ptr) < 0) {
@@ -660,7 +665,7 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   fiber->vc = get_cur_thread()->vc;
 
   // Initialize the fiber's spinlock
-  spinlock_init(fiber->lock);
+  spinlock_init(&(fiber->lock));
 
   // Initializes the fiber's list field
   INIT_LIST_HEAD(&(fiber->sched_node));
@@ -893,13 +898,10 @@ nk_fiber_t *__nk_fiber_fork()
   return new;
 }
 
-// TODO MAC: Should return an int because this can error
 int nk_fiber_join(nk_fiber_t *wait_on)
 {
   // Check if wait_on is NULL
-  // TODO: Should we make join return an int so we can indicate early abort?
-  // TODO MAC: don't sleep before checking is_done
-  // Also, there is a race condition (is_done being set on other CPU)
+  // TODO MAC: there is a race condition (is_done being set on other CPU)
   if (!wait_on){
     return -1;
   }

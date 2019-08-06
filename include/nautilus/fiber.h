@@ -75,7 +75,7 @@ typedef struct nk_fiber {
   
   nk_stack_size_t stack_size;
     
-  spinlock_t *lock; /* allows us to lock the fiber */
+  spinlock_t lock; /* allows us to lock the fiber */
   nk_fiber_status f_status;
   
   // TODO MAC: need to figure out screen/keyboard I/O

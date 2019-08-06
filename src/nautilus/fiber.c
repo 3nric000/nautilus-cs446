@@ -406,7 +406,10 @@ int _wake_fiber_thread(fiber_state *state)
   }
   #endif
   #if NAUT_CONFIG_ENABLE_WAIT 
-  nk_wait_queue_wake_one_extended(state->waitq, 1);
+  // TODO MAC: Small change made to stop panic
+  if (!(list_empty_careful(&(state->waitq->list)))) {
+    nk_wait_queue_wake_one_extended(state->waitq, 1);
+  }
   #endif
   return 0;
 }
@@ -418,9 +421,6 @@ static nk_thread_t *_get_random_fiber_thread()
   struct sys_info * sys = per_cpu_get(system);
   return sys->cpus[random_cpu]->f_state->fiber_thread;
 }
-
-// TODO MAC: Completely unecessary, put lock on fibers and then
-// check state (running, idle, waiting) and act accordingly
 
 static int _check_yield_to(nk_fiber_t *to_del){
   _LOCK_FIBER(to_del);

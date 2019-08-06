@@ -52,7 +52,6 @@ typedef struct nk_thread nk_thread_t;
 #define FSTACK_1MB 0x100000
 #define FSTACK_2MB 0x200000
 
-
 /******** EXTERNAL INTERFACE **********/
 
 typedef void (*nk_fiber_fun_t)(void *input, void **output);
@@ -66,8 +65,6 @@ typedef enum {  INIT,               // Being initialized
                                    // will not return
            RUN             // currently running routine (not on a fiber queue)
              } nk_fiber_status;
-
-
 
 typedef struct nk_fiber {
   uint64_t rsp;                /* +0  SHOULD NOT CHANGE POSITION */

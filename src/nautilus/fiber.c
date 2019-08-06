@@ -158,9 +158,13 @@ static nk_fiber_t* _rr_policy()
 
 static void _nk_fiber_exit(nk_fiber_t *f)
 {
+  // Acquire the exiting fiber's lock
+  _LOCK_FIBER(f);
+
   // Set status of fiber to exiting
   f->f_status = EXIT;
-  // Get the idle fiber for the current CPU
+
+  // next will be the fiber we're switching to (might be idle fiber)
   nk_fiber_t *next = NULL;
   
   // DEBUG: Prints out the exiting fiber's wait queue size
@@ -186,12 +190,9 @@ static void _nk_fiber_exit(nk_fiber_t *f)
       nk_fiber_run(temp, FIBER_RAND_CPU_FLAG);
     }
   }
-  // TODO MAC: do this w/ __sync_fetch_and_or ?
   // Mark the current fiber as done (since we are exiting)
   f->is_done = 1;
 
-  //TODO: PROBABLY WANT TO DO THESE ATOMICALLY (Frees and changing curr fiber)
-  
   next = _rr_policy();
   if (!(next)) {
     next = _NK_IDLE_FIBER();
@@ -200,6 +201,10 @@ static void _nk_fiber_exit(nk_fiber_t *f)
     
   // Removes the next fiber from the queue
   list_del_init(&(_GET_FIBER_STATE()->curr_fiber->sched_node));  
+
+  // TODO: is it even worth it to unlock the fiber? This might be useless
+  // Unlock the fiber before free (in case we implement reaping)
+  _UNLOCK_FIBER(f);
 
   // Free the current fiber's memory (stack, stack ptr, and wait queue)
   free(f->stack);
@@ -344,8 +349,6 @@ static int _nk_fiber_yield_to(nk_fiber_t *f_to)
   if (!f_from->is_idle){ 
     nk_fiber_set_vc(f_from->vc);
   }
-  // Change Status of to and from fibers
-  // TODO MAC: Don't change if f_from is waiting
 
   _LOCK_FIBER(f_to);
   f_to->curr_cpu = my_cpu_id();
@@ -393,7 +396,7 @@ static int _nk_initial_placement()
     return (int)(_get_random() % sys->num_cpus);
 }
 
-int _wake_fiber_thread(fiber_state *state)
+static int _wake_fiber_thread(fiber_state *state)
 {
   #if NAUT_CONFIG_ENABLE_SLEEP
   nk_thread_t *curr_thread = get_cur_thread();
@@ -485,10 +488,6 @@ int nk_fiber_init()
 
     FIBER_INFO("Initializing fibers on BSP\n");
 
-    //timing_test(1000000,1000000,1);
-    //INFO("Hanging\n");
-    //while (1) { asm("hlt"); }
-
     my_cpu->f_state = init_local_fiber_state();
     if (!(my_cpu->f_state)) { 
 	ERROR("Could not intialize fiber thread\n");
@@ -498,14 +497,6 @@ int nk_fiber_init()
     return 0;
 }
 
-// TODO MAC: Introduce multiple options for idle fiber behavior:
-    // Idle only spins
-      // NAUT_CONFIG_ENABLE_SPIN
-    // Idle does a sleep
-      // NAUT_CONFIG_ENABLE_SLEEP
-        // NAUT_CONFIG_FIBER_THREAD_SLEEP_TIME
-    // Idle puts thread to sleep on a wait queue w/ nk_fiber_run doing wakeup of target thread
-      // NAUT_CONFIG_ENABLE_WAIT
 static void __nk_fiber_idle(void *in, void **out)
 {
   while (1) {
@@ -753,7 +744,6 @@ int nk_fiber_start(nk_fiber_fun_t fun,
   return 0;
 }
 
-// TODO MAC: check if we're running in the fiber thread before we allow yield to take place
 int nk_fiber_yield()
 {
   if (_GET_FIBER_THREAD() != get_cur_thread()) {
@@ -762,7 +752,6 @@ int nk_fiber_yield()
   // Pick a random fiber to yield to (NULL if no fiber in queue)
   nk_fiber_t *f_to = _rr_policy();
 
-  // TODO MAC: Move into separate function for debugging 
   #if NAUT_CONFIG_DEBUG_FIBERS
   _debug_yield(f_to);
   #endif
@@ -817,6 +806,7 @@ int nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag)
   return 0;
 }
 
+// TODO MAC: Talk with Prof. Dinda about race condition
 int nk_fiber_conditional_yield(uint8_t (*cond_function)(void *param), void *state)
 {
   if (cond_function(state)){
@@ -825,6 +815,7 @@ int nk_fiber_conditional_yield(uint8_t (*cond_function)(void *param), void *stat
   return 1;
 }
 
+//TODO MAC: Talk with Prof. Dinda about race condition in this, too.
 int nk_fiber_conditional_yield_to(nk_fiber_t *fib, uint8_t (*cond_function)(void *param), void *state)
 {
   if (cond_function(state)){
@@ -928,7 +919,6 @@ nk_fiber_t *__nk_fiber_fork()
 int nk_fiber_join(nk_fiber_t *wait_on)
 {
   // Check if wait_on is NULL
-  // TODO MAC: there is a race condition (is_done being set on other CPU)
   if (!wait_on){
     return -1;
   }
@@ -937,8 +927,6 @@ int nk_fiber_join(nk_fiber_t *wait_on)
   
   // DEBUG: Prints out our intent to add curr_fiber to wait_on's wait queue
   FIBER_DEBUG("nk_fiber_join() : about to enqueue fiber %p on the wait queue %p\n", curr_fiber, &(wait_on->wait_queue));
-
-  // MAC TODO: Should check if wait_on is a valid fiber? But how?
 
   // Adds curr_fiber to wait_on's wait queue
   _LOCK_FIBER(wait_on);

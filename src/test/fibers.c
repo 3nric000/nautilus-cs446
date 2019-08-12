@@ -41,7 +41,8 @@
 #endif
 
 struct nk_virtual_console *vc;
-
+nk_fiber_t *first_l;
+nk_fiber_t *second_l;
 
 /******************* Test Routines *******************/
 
@@ -301,7 +302,7 @@ void fiber_routine3(void *i, void **o)
   nk_vc_printf("fiber_routine3() : fiber is finished, a = %d\n",  a);
 }
 
-#define N 100000
+#define N 10000000
 void first_timer(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
@@ -329,6 +330,37 @@ void second_timer(void *i, void **o)
   }
   nk_vc_printf("Second Timer is finished, a = %d\n", a);
 }
+
+extern void nk_fiber_context_switch(nk_fiber_t *curr, nk_fiber_t *next);
+
+void first_lower(void *i, void **o)
+{
+  nk_fiber_set_vc(vc);
+  int a = 0;
+  uint64_t start = 0;
+  uint64_t end = 0; 
+  while(a < N){
+    if (a == 2) {
+        start = rdtsc();
+    }
+    nk_fiber_context_switch(first_l, second_l);
+    a++;
+  }
+  end = rdtsc();
+  nk_vc_printf("First Timer is finished, a = %d, cycle count = %d, cycles per iteration = %d\n", a, end-start, (end-start)/N);
+}  
+
+void second_lower(void *i, void **o)
+{
+  nk_fiber_set_vc(vc);
+  int a = 0;
+  while(a < N){
+    nk_fiber_context_switch(second_l, first_l);
+    a++;
+  }
+  nk_vc_printf("Second Timer is finished, a = %d\n", a);
+}
+
 
 
 /******************* Test Wrappers *******************/
@@ -446,10 +478,20 @@ int test_fiber_timing(){
 }
 
 
+int test_fiber_lower(){
+  vc = get_cur_thread()->vc;
+  nk_fiber_set_vc(vc);
+  nk_fiber_create(second_lower, 0, 0, 0, &second_l);
+  nk_fiber_start(first_lower, 0, 0, 0, FIBER_CURR_CPU_FLAG, &first_l);
+  return 0;
+}
+    
+
+
 /******************* Test Handlers *******************/
 
 static int
-handle_fibers (char * buf, void * priv)
+handle_fibers1 (char * buf, void * priv)
 {
   test_fibers();
 
@@ -522,13 +564,32 @@ handle_fibers10 (char * buf, void * priv)
   return 0;
 }
 
+static int handle_fibers11 (char *buf, void *priv)
+{
+  test_fiber_lower();
+  return 0;
+}
 
+static int handle_fibers (char *buf, void *priv)
+{
+  test_fibers();
+  test_nested_fibers();
+  test_fibers_counter(); 
+  test_yield_to();
+  test_fiber_join();
+  test_fiber_fork();
+  test_fiber_fork_join();
+  test_fiber_routine();
+  test_fiber_routine_2();
+  return 0;
+}
+  
 /******************* Shell Structs ********************/
 
-static struct shell_cmd_impl fibers_impl = {
+static struct shell_cmd_impl fibers_impl1 = {
   .cmd      = "fibertest",
   .help_str = "fibertest",
-  .handler  = handle_fibers,
+  .handler  = handle_fibers1,
 };
 
 static struct shell_cmd_impl fibers_impl2 = {
@@ -585,10 +646,22 @@ static struct shell_cmd_impl fibers_impl10 = {
   .handler  = handle_fibers10,
 };
 
+static struct shell_cmd_impl fibers_impl11 = {
+  .cmd      = "fibertime2",
+  .help_str = "fibertime2",
+  .handler  = handle_fibers11,
+};
+
+static struct shell_cmd_impl fibers_impl_all = {
+  .cmd      = "fiberall",
+  .help_str = "run all fiber tests",
+  .handler  = handle_fibers,
+};
+
 
 /******************* Shell Commands *******************/
 
-nk_register_shell_cmd(fibers_impl);
+nk_register_shell_cmd(fibers_impl1);
 nk_register_shell_cmd(fibers_impl2);
 nk_register_shell_cmd(fibers_impl3);
 nk_register_shell_cmd(fibers_impl4);
@@ -598,3 +671,5 @@ nk_register_shell_cmd(fibers_impl7);
 nk_register_shell_cmd(fibers_impl8);
 nk_register_shell_cmd(fibers_impl9);
 nk_register_shell_cmd(fibers_impl10);
+nk_register_shell_cmd(fibers_impl11);
+nk_register_shell_cmd(fibers_impl_all);

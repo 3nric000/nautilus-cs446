@@ -62,14 +62,12 @@
 #define _NK_IDLE_FIBER() get_cpu()->f_state->idle_fiber
 #define _GET_FIBER_THREAD() get_cpu()->f_state->fiber_thread
 #define _GET_SCHED_HEAD() &(get_cpu()->f_state->f_sched_queue)
-#define _GET_SCHED_QUEUE_LOCK() &(get_cpu()->f_state->lock)
-#define _GET_FIBER_LOCK(f) &(f->lock)
-
+ 
 /* Macros for locking and unlocking fibers */
 #define _LOCK_SCHED_QUEUE(state) spin_lock(&(state->lock)) 
 #define _UNLOCK_SCHED_QUEUE(state) spin_unlock(&(state->lock)) 
-#define _LOCK_FIBER(f) spin_lock(_GET_FIBER_LOCK(f))
-#define _UNLOCK_FIBER(f) spin_unlock(_GET_FIBER_LOCK(f))
+#define _LOCK_FIBER(f) spin_lock(&(f->lock))
+#define _UNLOCK_FIBER(f) spin_unlock(&(f->lock))
 
 typedef struct nk_fiber_percpu_state {
     spinlock_t  lock;
@@ -120,12 +118,11 @@ static struct list_head* _get_sched_head()
 // returns the fiber sched queue lock
 static spinlock_t *_get_sched_queue_lock()
 {
-  return _GET_SCHED_QUEUE_LOCK(); 
+  return &(get_cpu()->f_state->lock); 
 }
 
 /*
- * utility function for setting up
- * a fiber's stack 
+ * utility function for setting up  a fiber's stack 
  */
 static void _fiber_push(nk_fiber_t * f, uint64_t x)
 {
@@ -193,6 +190,7 @@ static void _nk_fiber_exit(nk_fiber_t *f)
   // Mark the current fiber as done (since we are exiting)
   f->is_done = 1;
 
+  // Picks fiber to switch to and updates fiber state
   next = _rr_policy();
   if (!(next)) {
     next = _NK_IDLE_FIBER();
@@ -318,15 +316,17 @@ static void _nk_fiber_init(nk_fiber_t *f)
 
 static int _nk_fiber_yield_to(nk_fiber_t *f_to)
 {
-  // Get the current fiber
+  // Get the current fiber and lock it
   nk_fiber_t *f_from = nk_fiber_current();
-  _LOCK_FIBER(f_from); 
+  _LOCK_FIBER(f_from);
+ 
   // If a fiber is not waiting or exiting, change its status to yielding
   if (f_from->f_status != WAIT && f_from->f_status != EXIT) {
     f_from->f_status = YIELD;
   }
+
   fiber_state *state = _GET_FIBER_STATE();
-  // Enqueue the current fiber (if not on wait queue)
+  // Enqueue the current fiber (if not on a wait queue)
   if (!(f_from->is_idle) && f_from->f_status != WAIT) {
     _LOCK_SCHED_QUEUE(state);
     // Gets the sched queue for the current CPU
@@ -342,8 +342,9 @@ static int _nk_fiber_yield_to(nk_fiber_t *f_to)
     _UNLOCK_SCHED_QUEUE(state);
   }
   
-  // Context switch (register saving and stack change)
+  // Begin context switch (register saving, state update, and stack change)
   state->curr_fiber = f_to;
+
   // Change the vc of the current thread if we aren't switching away from the idle fiber
   // TODO: MAC: Might not do what I think it does
   if (!f_from->is_idle){ 
@@ -353,9 +354,13 @@ static int _nk_fiber_yield_to(nk_fiber_t *f_to)
   _LOCK_FIBER(f_to);
   f_to->curr_cpu = my_cpu_id();
   f_to->f_status = RUN;
+
+  /* DEBUG: Shows when we are switching to idle fiber. We want to minimize this!
   if (f_to->is_idle) {
-    FIBER_DEBUG("_nk_fiber_yield_to() : Switched to idle fiber on CPU %d\n", my_cpu_id());
+    FIBER_INFO("_nk_fiber_yield_to() : Switched to idle fiber on CPU %d\n", my_cpu_id());
   }
+  */
+
   _UNLOCK_FIBER(f_from);
   _UNLOCK_FIBER(f_to);
   nk_fiber_context_switch(f_from, f_to);

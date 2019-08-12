@@ -170,25 +170,27 @@ void nk_fiber_startup();
     movq %r13, -104(%rsp); \
     movq %r14, -112(%rsp); \
     movq %r15, -120(%rsp); \
-    subq $120, %rsp; 
+    movq %rsp, %rax; \
+    subq $120, %rax; 
 
 #define FIBER_RESTORE_GPRS() \
-    movq (%rsp), %r15; \
-    movq 8(%rsp), %r14; \
-    movq 16(%rsp), %r13; \
-    movq 24(%rsp), %r12; \
-    movq 32(%rsp), %r11; \
-    movq 40(%rsp), %r10; \
-    movq 48(%rsp), %r9; \
-    movq 56(%rsp), %r8; \
-    movq 64(%rsp), %rbp; \
-    movq 72(%rsp), %rdi; \
-    movq 80(%rsp), %rsi; \
-    movq 88(%rsp), %rdx; \
-    movq 96(%rsp), %rcx; \
-    movq 104(%rsp), %rbx; \
+    movq (%rax), %r15; \
+    movq 8(%rax), %r14; \
+    movq 16(%rax), %r13; \
+    movq 24(%rax), %r12; \
+    movq 32(%rax), %r11; \
+    movq 40(%rax), %r10; \
+    movq 48(%rax), %r9; \
+    movq 56(%rax), %r8; \
+    movq 64(%rax), %rbp; \
+    movq 72(%rax), %rdi; \
+    movq 80(%rax), %rsi; \
+    movq 88(%rax), %rdx; \
+    movq 96(%rax), %rcx; \
+    movq 104(%rax), %rbx; \
+    movq %rax, %rsp; \
     movq 112(%rsp), %rax; \
-    addq $120, %rsp; 
+    addq $120, %rsp;
 
 #define FIBER_RESTORE_GPRS_NOT_RAX() \
     movq (%rsp), %r15; \

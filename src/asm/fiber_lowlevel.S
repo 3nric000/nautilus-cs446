@@ -60,25 +60,27 @@
 
 
 ENTRY(nk_fiber_context_switch)
+    // Saves GPRs without modifying %rsp
     FIBER_SAVE_GPRS()
 //    SAVE_FPRS()
-    movq %rsp, 0x0(%rdi)
-    movq 0x0(%rsi), %rsp
-// Could we keep track of which floating point registers need to be saved
-// using unused registers (we talked about during last meeting) and then 
-// using a bitmask to figure out which registers to save? 
-//    RESTORE_FPRS()
+    // puts new %rsp value into f_from's stack ptr
+    movq %rax, 0x0(%rdi)
+    // puts f_to's stack ptr in %rax
+    // this allows us to not change %rsp until the very end
+    movq 0x0(%rsi), %rax
     FIBER_RESTORE_GPRS()
+//    RESTORE_FPRS()
     retq
 
 ENTRY(_nk_exit_switch)
-    movq 0x0(%rdi), %rsp
+    movq 0x0(%rdi), %rax
     // RESTORE_FPRS()
     FIBER_RESTORE_GPRS()
     retq
 
 ENTRY(nk_fiber_fork)
     FIBER_SAVE_GPRS()
+    movq %rax, %rsp
     callq __nk_fiber_fork
 
 ENTRY(_nk_fiber_fork_exit)

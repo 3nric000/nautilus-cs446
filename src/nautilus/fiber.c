@@ -206,8 +206,8 @@ static nk_fiber_t* _rr_policy()
   free(f->stack);
   free(f);
   
-   // Switch back to the idle fiber using special exit function
-   // Jumps to exit switch so we avoid pushing return addr to freed stack
+  // Switch back to the idle fiber using special exit function
+  // Jumps to exit switch so we avoid pushing return addr to freed stack
   __asm__ __volatile__ ("movq %0, %%rdi;"
                         "jmp _nk_exit_switch;" : : "r"(next) : "memory");
 }
@@ -797,7 +797,7 @@ int nk_fiber_yield()
   _UNLOCK_SCHED_QUEUE(state);
   
   #if NAUT_CONFIG_DEBUG_FIBERS
-  _debug_yield(f_to);
+  //_debug_yield(f_to);
   #endif
 
   // If f_to is NULL, there are no fibers in the queue

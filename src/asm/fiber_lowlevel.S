@@ -64,6 +64,34 @@ ENTRY(nk_fiber_context_switch)
     FIBER_SAVE_GPRS()
 //    SAVE_FPRS()
     // puts new %rsp value into f_from's stack ptr
+    movq %rsp, 0x0(%rdi)
+    // puts f_to's stack ptr in %rax
+    // this allows us to not change %rsp until the very end
+    movq 0x0(%rsi), %rsp
+    FIBER_RESTORE_GPRS()
+//    RESTORE_FPRS()
+    retq
+
+ENTRY(_nk_exit_switch)
+    movq 0x0(%rdi), %rsp
+    // RESTORE_FPRS()
+    FIBER_RESTORE_GPRS()
+    retq
+
+ENTRY(nk_fiber_fork)
+    FIBER_SAVE_GPRS()
+    callq __nk_fiber_fork
+
+ENTRY(_nk_fiber_fork_exit)
+    FIBER_RESTORE_GPRS_NOT_RAX()
+    //FIBER_RESTORE_GPRS()
+    retq
+/*
+ENTRY(nk_fiber_context_switch)
+    // Saves GPRs without modifying %rsp
+    FIBER_SAVE_GPRS()
+//    SAVE_FPRS()
+    // puts new %rsp value into f_from's stack ptr
     movq %rax, 0x0(%rdi)
     // puts f_to's stack ptr in %rax
     // this allows us to not change %rsp until the very end
@@ -87,4 +115,4 @@ ENTRY(_nk_fiber_fork_exit)
     FIBER_RESTORE_GPRS_NOT_RAX()
     //FIBER_RESTORE_GPRS()
     retq
-
+*/

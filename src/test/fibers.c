@@ -88,7 +88,7 @@ void fiber_outer_join(void *i, void **o)
   while(a < 3){
     nk_vc_printf("Fiber outer a = %d\n", a++);
     nk_fiber_t *f_inner_join;
-    nk_fiber_start(fiber_inner_join, 0, 0, 0, 1, &f_inner_join);
+    nk_fiber_start(fiber_inner_join, 0, 0, 0, FIBER_CURR_CPU_FLAG, &f_inner_join);
     nk_fiber_join(f_inner_join);
     nk_fiber_yield();
   }
@@ -217,7 +217,6 @@ void fiber_fourth(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  //nk_fiber_t **temp = (nk_fiber_t**)i;
   nk_fiber_t *f_to = (nk_fiber_t*)i;
   while(a < 5){
     nk_vc_printf("fiber_fourth() : a = %d and yielding to fiber_first = %p\n", a++, f_to);
@@ -569,12 +568,29 @@ static int handle_fibers (char *buf, void *priv)
   test_fibers();
   test_nested_fibers();
   test_fibers_counter(); 
-  test_yield_to();
   test_fiber_join();
   test_fiber_fork();
   test_fiber_fork_join();
   test_fiber_routine();
   test_fiber_routine_2();
+  test_yield_to();
+  return 0;
+}
+
+static int handle_fibers_all (char *buf, void *priv)
+{
+  int i = 0;
+  for (i = 0; i < 20; i++) {
+    test_fibers();
+    test_nested_fibers();
+    test_fibers_counter(); 
+    //test_fiber_join();
+    //test_fiber_fork();
+    //test_fiber_fork_join();
+    //test_fiber_routine();
+    //test_fiber_routine_2();
+    //test_yield_to();
+  }
   return 0;
 }
   
@@ -652,6 +668,12 @@ static struct shell_cmd_impl fibers_impl_all = {
   .handler  = handle_fibers,
 };
 
+static struct shell_cmd_impl fibers_impl_all_1 = {
+  .cmd      = "fiberall1",
+  .help_str = "run all fiber tests in loop",
+  .handler  = handle_fibers_all,
+};
+
 
 /******************* Shell Commands *******************/
 
@@ -667,3 +689,4 @@ nk_register_shell_cmd(fibers_impl9);
 nk_register_shell_cmd(fibers_impl10);
 nk_register_shell_cmd(fibers_impl11);
 nk_register_shell_cmd(fibers_impl_all);
+nk_register_shell_cmd(fibers_impl_all_1);

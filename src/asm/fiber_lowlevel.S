@@ -86,6 +86,11 @@ ENTRY(_nk_fiber_fork_exit)
     FIBER_RESTORE_GPRS_NOT_RAX()
     //FIBER_RESTORE_GPRS()
     retq
+
+ENTRY(__nk_fiber_fork_wrapper)
+    //addq $16, %rsp
+    jmp (%rsp)
+
 /*
 ENTRY(nk_fiber_context_switch)
     // Saves GPRs without modifying %rsp

@@ -890,7 +890,7 @@ nk_fiber_t *__nk_fiber_fork()
   void *rbp0      = __builtin_frame_address(0);                   // current rbp, *rbp0 = rbp1
   void *rbp1      = __builtin_frame_address(1);                   // caller rbp, *rbp1 = rbp2  (forker's frame)
   void *rbp_tos   = __builtin_frame_address(STACK_CLONE_DEPTH);   // should scan backward to avoid having this be zero or crazy
-  void *ret0_addr = rbp0 + 8;
+  void *ret0_addr = rbp0 + 0x8;
   FIBER_DEBUG("__nk_fiber_fork() : rbp0: %p, rbp1: %p, rbp_tos: %p, ret0_addr: %p\n", rbp0, rbp1, rbp_tos, ret0_addr);
   if ((uint64_t)rbp_tos <= (uint64_t)curr->stack ||
 	(uint64_t)rbp_tos >= (uint64_t)(curr->stack + curr->stack_size)) { 
@@ -899,16 +899,17 @@ nk_fiber_t *__nk_fiber_fork()
     }
 
 
-    // this is the address at which the fork wrapper (nk_fiber_fork) stashed
-    // the current value of rbp - this must conform to the GPR SAVE model
-    // in fiber.h
+  // this is the address at which the fork wrapper (nk_fiber_fork) stashed
+  // the current value of rbp - this must conform to the GPR SAVE model
+  // in fiber.h
   void *rbp_stash_addr = ret0_addr + 9*8; 
   
   // from last byte of tos_rbp to the last byte of the stack on return from this function 
-    // (return address of wrapper)
-    // the "launch pad" is added so that in the case where there is no stack frame above the caller
-    // we still have the space to fake one.
+  // (return address of wrapper)
+  // the "launch pad" is added so that in the case where there is no stack frame above the caller
+  // we still have the space to fake one.
   size = (rbp_tos + 8) - ret0_addr + LAUNCHPAD;
+  
   rbp1_offset_from_ret0_addr = rbp1 - ret0_addr;
 
   rbp_stash_offset_from_ret0_addr = rbp_stash_addr - ret0_addr;
@@ -921,25 +922,28 @@ nk_fiber_t *__nk_fiber_fork()
   nk_fiber_t *new;
   nk_fiber_create(NULL, NULL, 0, alloc_size, &new);
   
+  child_stack = new->stack;
+   
   // current fiber's stack is copied to new fiber
   _fiber_push(new, (uint64_t)&_nk_fiber_cleanup);  
-  
-  child_stack = new->stack;
+
+ 
   FIBER_DEBUG("__nk_fiber_fork() : child_stack: %p, alloc_size: %p, size: %p\n", child_stack, alloc_size, size);
+  
   memcpy(child_stack + alloc_size - size, ret0_addr, size - LAUNCHPAD);
   new->rsp = (uint64_t)(child_stack + alloc_size - size + 0x8);
   FIBER_DEBUG("__nk_fiber_fork() : new->rsp is %p\n", new->rsp); 
 
   // Update the child's snapshot of rbp on its stack (that was done
-   // by nk_fiber_fork()) with the corresponding position in the child's stack
-   // when nk_fiber_fork() unwinds the GPRs, it will end up with rbp pointing
-   // into the cloned stack instead of the old stack
+  // by nk_fiber_fork()) with the corresponding position in the child's stack
+  // when nk_fiber_fork() unwinds the GPRs, it will end up with rbp pointing
+  // into the cloned stack instead of the old stack
   void **rbp_stash_ptr = (void**)(new->rsp + rbp_stash_offset_from_ret0_addr - 0x8);
-  *rbp_stash_ptr = (void*)(new->rsp + rbp_offset_from_ret0_addr);
+  *rbp_stash_ptr = (void*)(new->rsp + rbp_offset_from_ret0_addr - 0x8);
   
   // Determine caller's rbp copy and return address in the child stack
-  void **rbp2_ptr = (void**)(new->rsp + rbp1_offset_from_ret0_addr + 0x8);
-  void **ret2_ptr = rbp2_ptr-1;
+  void **rbp2_ptr = (void**)(new->rsp + rbp1_offset_from_ret0_addr - 0x8);
+  void **ret2_ptr = rbp2_ptr+1;
    
   FIBER_DEBUG("__nk_fiber_fork() : rbp_stash_ptr: %p, rbp2_ptr: %p, ret2_ptr: %p\n", rbp_stash_ptr, rbp2_ptr, ret2_ptr);
   // rbp2 we don't care about since we will not not

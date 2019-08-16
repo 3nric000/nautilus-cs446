@@ -245,7 +245,7 @@ void fiber_fork_join(void *i, void **o)
   int a = 0;
   nk_fiber_t *f_new;
   f_new = nk_fiber_fork();
-  if(f_new){
+  if(f_new != (void*)0xdeadbeefdeadbeef){
     nk_fiber_join(f_new);
   }
 
@@ -272,7 +272,7 @@ void fiber_routine1(void *i, void **o)
   while(a < 5){
     f_new = nk_fiber_fork();
     nk_fiber_t *curr = nk_fiber_current();
-    if(f_new){
+    if(f_new != (void*)0xdeadbeefdeadbeef){
       nk_fiber_t *new;
       nk_fiber_start(fiber_routine2, 0, 0, 0, FIBER_RAND_CPU_FLAG, &new);
       break;
@@ -585,10 +585,10 @@ static int handle_fibers_all (char *buf, void *priv)
     test_nested_fibers();
     test_fibers_counter(); 
     test_fiber_join();
-    //test_fiber_fork();
-    //test_fiber_fork_join();
-    //test_fiber_routine();
-    //test_fiber_routine_2();
+    test_fiber_fork();
+    test_fiber_fork_join();
+    test_fiber_routine();
+    test_fiber_routine_2();
     test_yield_to();
   }
   return 0;
@@ -603,10 +603,10 @@ static int handle_fibers_all_1 (char *buf, void *priv)
     test_fibers_counter(); 
     test_fiber_join();
     test_yield_to();
-    //test_fiber_fork();
-    //test_fiber_fork_join();
-    //test_fiber_routine();
-    //test_fiber_routine_2();
+    test_fiber_fork();
+    test_fiber_fork_join();
+    test_fiber_routine();
+    test_fiber_routine_2();
   }
   return 0;
 }

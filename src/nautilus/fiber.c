@@ -903,7 +903,7 @@ nk_fiber_t *__nk_fiber_fork()
   if ((uint64_t)rbp_tos <= (uint64_t)curr->stack ||
 	(uint64_t)rbp_tos >= (uint64_t)(curr->stack + curr->stack_size)) { 
 	FIBER_DEBUG("__nk_fiber_fork() : Cannot resolve %lu stack frames on fork, using just one\n", STACK_CLONE_DEPTH);
-        rbp_tos = rbp1 + 0x8;
+        rbp_tos = rbp1;
     }
 
 
@@ -939,24 +939,39 @@ nk_fiber_t *__nk_fiber_fork()
   FIBER_DEBUG("__nk_fiber_fork() : child_stack: %p, alloc_size: %p, size: %p\n", child_stack, alloc_size, size);
   
   memcpy(child_stack + alloc_size - size - 0x0, ret0_addr - 0x0, size - LAUNCHPAD + 0x0);
-  new->rsp = (uint64_t)(child_stack + alloc_size - size + 0x8);
-  FIBER_DEBUG("__nk_fiber_fork() : new->rsp is %p\n", new->rsp); 
+  void **rbp_stash_ptr;
+  void **rbp2_ptr;
+  void **ret2_ptr; 
+  if (rbp_tos != rbp1) {
+    new->rsp = (uint64_t)(child_stack + alloc_size - size + 0x8);
+    FIBER_DEBUG("__nk_fiber_fork() : new->rsp is %p\n", new->rsp); 
 
   // Update the child's snapshot of rbp on its stack (that was done
   // by nk_fiber_fork()) with the corresponding position in the child's stack
   // when nk_fiber_fork() unwinds the GPRs, it will end up with rbp pointing
   // into the cloned stack instead of the old stack
-  void **rbp_stash_ptr = (void**)(new->rsp + rbp_stash_offset_from_ret0_addr - 0x8);
+  rbp_stash_ptr = (void**)(new->rsp + rbp_stash_offset_from_ret0_addr - 0x08);
   FIBER_DEBUG("__nk_fiber_fork() : rsp: %p, at rsp: %p, rbp_stash_offset_from_ret0_addr: %p\n", new->rsp, *(void**)new->rsp, rbp_stash_offset_from_ret0_addr);
-  FIBER_DEBUG("__nk_fiber_fork() : rsp: %p, rbp_stash_offset_from_ret0_addr: %p\n", *(void**)(new->rsp + 0x80), *(void**)(new->rsp+rbp_stash_offset_from_ret0_addr -0x8));
+  FIBER_DEBUG("__nk_fiber_fork() : rsp + 0x78: %p, rbp_stash_offset_from_ret0_addr: %p\n", *(void**)(new->rsp + 0x78), *(void**)(new->rsp+rbp_stash_offset_from_ret0_addr/* -0x8*/));
   *rbp_stash_ptr = (void*)(new->rsp + rbp_offset_from_ret0_addr);
   FIBER_DEBUG("__nk_fiber_fork() : rbp_stash_ptr: %p\n", *rbp_stash_ptr); 
   // Determine caller's rbp copy and return address in the child stack
-  void **rbp2_ptr = (void**)(new->rsp + rbp1_offset_from_ret0_addr)-0x8;
-  void **ret2_ptr = rbp2_ptr+0x8;
-   
-  FIBER_DEBUG("__nk_fiber_fork() : rbp_stash_ptr: %p, rbp2_ptr: %p, ret2_ptr: %p\n", rbp1_offset_from_ret0_addr, rbp2_ptr, ret2_ptr);
-  FIBER_DEBUG("__nk_fiber_fork() : rbp_stash_ptr: %p, rbp2_ptr: %p, ret2_ptr: %p\n", *(void**)(rbp2_ptr - 0x8), *rbp2_ptr, *ret2_ptr);
+  rbp2_ptr = (void**)(new->rsp + rbp1_offset_from_ret0_addr - 0x8)/*-0x8*/;
+  ret2_ptr = rbp2_ptr + 1;
+  } else {
+    new->rsp = (uint64_t)(child_stack + alloc_size - size + 0x8);
+    rbp_stash_ptr = (void**)(new->rsp + rbp_stash_offset_from_ret0_addr - 0x8);
+    *rbp_stash_ptr = (void*)(new->rsp + rbp_offset_from_ret0_addr);
+    rbp2_ptr = (void**)(new->rsp + rbp1_offset_from_ret0_addr - 0x8)/*-0x8*/;
+    ret2_ptr = rbp2_ptr;
+  }
+
+ // void **ret3_ptr = (void**)(new->rsp + 0x78);
+ // *ret3_ptr = *(void**)(new->rsp+0x78); 
+  //FIBER_DEBUG("__nk_fiber_fork() : ret3ptr : %p, at rsp: %p, at ret3: %p\n", ret3_ptr, *(void**)(new->rsp + 0x80), *ret3_ptr);
+ 
+  FIBER_DEBUG("__nk_fiber_fork() : rbp1_offset_from_ret0_addr: %p, rbp2_ptr: %p, ret2_ptr: %p\n", rbp1_offset_from_ret0_addr, rbp2_ptr, ret2_ptr);
+  FIBER_DEBUG("__nk_fiber_fork() : rbp2_ptr - 0x8: %p, rbp2_ptr: %p, ret2_ptr: %p\n", *(void**)(rbp2_ptr - 0x8), *rbp2_ptr, *ret2_ptr);
   // rbp2 we don't care about since we will not not
   // return from the caller in the child, but rather go into the fiber cleanup
   *rbp2_ptr = 0x0ULL;
@@ -964,7 +979,8 @@ nk_fiber_t *__nk_fiber_fork()
   // fix up the return address to point to our fiber cleanup function
   // so when caller returns, the fiber exists
   *ret2_ptr = &_nk_fiber_cleanup;
-  *(void**)(new->rsp + 0x80) = &__nk_fiber_fork_wrapper;
+  //*ret3_ptr = &_nk_fiber_cleanup;
+  //*(void**)(new->rsp + 0x80) = &__nk_fiber_fork_wrapper;
   FIBER_DEBUG("__nk_fiber_fork() : rbp2_ptr - 0x8: %p, rbp2_ptr: %p, ret2_ptr: %p\n", *(void**)(rbp2_ptr - 0x8), *rbp2_ptr, *ret2_ptr);
   FIBER_DEBUG("__nk_fiber_fork() : at rsp + 0x78: %p, rsp + 0x80: %p, rsp + 0x88: %p\n", (void**)(new->rsp + 0x80), *(void**)(new->rsp) + 0x70, *(void**)(new->rsp+0x88));
  // Adjust RSP so we switch into new fiber's stack at correct place

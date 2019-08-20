@@ -245,7 +245,7 @@ void fiber_fork_join(void *i, void **o)
   int a = 0;
   nk_fiber_t *f_new;
   f_new = nk_fiber_fork();
-  if(f_new != (void*)0xdeadbeefdeadbeef){
+  if(f_new){
     nk_fiber_join(f_new);
   }
 
@@ -272,7 +272,7 @@ void fiber_routine1(void *i, void **o)
   while(a < 5){
     f_new = nk_fiber_fork();
     nk_fiber_t *curr = nk_fiber_current();
-    if(f_new != (void*)0xdeadbeefdeadbeef){
+    if(f_new){
       nk_fiber_t *new;
       nk_fiber_start(fiber_routine2, 0, 0, 0, FIBER_RAND_CPU_FLAG, &new);
       break;
@@ -597,7 +597,7 @@ static int handle_fibers_all (char *buf, void *priv)
 static int handle_fibers_all_1 (char *buf, void *priv)
 {
   int i = 0;
-  for (i = 0; i < 20; i++) {
+  for (i = 0; i < 100; i++) {
     test_fibers();
     test_nested_fibers();
     test_fibers_counter(); 

@@ -271,9 +271,9 @@ static void _nk_fiber_init(nk_fiber_t *f)
   _fiber_push(f, 0xdeadbeef12345671ul);
   _fiber_push(f, 0xdeadbeef12345672ul);
   _fiber_push(f, 0xdeadbeef12345673ul);
-  _fiber_push(f, 0xdeadbeef12345674ul);
+  _fiber_push(f, 0x0ul);
   _fiber_push(f, (uint64_t) f);
-  _fiber_push(f, 0xdeadbeef12345675ul);
+  _fiber_push(f, 0x0ul);
   _fiber_push(f, 0xdeadbeef12345676ul);
   _fiber_push(f, 0xdeadbeef12345677ul);
   _fiber_push(f, 0xdeadbeef12345678ul);
@@ -961,6 +961,8 @@ nk_fiber_t *__nk_fiber_fork()
       *rbp_stash_ptr = (void*)(new->rsp + rbp_offset_from_ret0_addr);
       rbp2_ptr = (void**)(new->rsp + rbp1_offset_from_ret0_addr - 0x8);
       ret2_ptr = rbp2_ptr;
+      //void **ret3_ptr = rbp2_ptr+1;
+      //*ret3_ptr = &_nk_fiber_cleanup;
   }
  
   FIBER_DEBUG("__nk_fiber_fork() : rbp1_offset_from_ret0_addr: %p, rbp2_ptr: %p, ret2_ptr: %p\n", rbp1_offset_from_ret0_addr, rbp2_ptr, ret2_ptr);

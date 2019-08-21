@@ -922,7 +922,9 @@ nk_fiber_t *__nk_fiber_fork()
   // Allocate new fiber struct using current fiber's data
   nk_fiber_t *new;
   nk_fiber_create(NULL, NULL, 0, alloc_size, &new);
-  
+  if (!new) {
+    panic("__nk_fiber_fork() : could not allocate new fiber. Fork failed.\n");
+  }
   child_stack = new->stack;
    
   // current fiber's stack is copied to new fiber
@@ -946,7 +948,7 @@ nk_fiber_t *__nk_fiber_fork()
     rbp_stash_ptr = (void**)(new->rsp + rbp_stash_offset_from_ret0_addr - 0x08);
   
     FIBER_DEBUG("__nk_fiber_fork() : rsp: %p, at rsp: %p, rbp_stash_offset_from_ret0_addr: %p\n", new->rsp, *(void**)new->rsp, rbp_stash_offset_from_ret0_addr);
-    FIBER_DEBUG("__nk_fiber_fork() : rsp + 0x78: %p, rbp_stash_offset_from_ret0_addr: %p\n", *(void**)(new->rsp + 0x78), *(void**)(new->rsp+rbp_stash_offset_from_ret0_addr/* -0x8*/));
+    FIBER_DEBUG("__nk_fiber_fork() : rsp + 0x78: %p, rbp_stash_offset_from_ret0_addr: %p\n", *(void**)(new->rsp + 0x78), *(void**)(new->rsp+rbp_stash_offset_from_ret0_addr -0x8));
   
     *rbp_stash_ptr = (void*)(new->rsp + rbp_offset_from_ret0_addr);
   
@@ -959,8 +961,8 @@ nk_fiber_t *__nk_fiber_fork()
       new->rsp = (uint64_t)(child_stack + alloc_size - size + 0x8);
       rbp_stash_ptr = (void**)(new->rsp + rbp_stash_offset_from_ret0_addr - 0x8);
       *rbp_stash_ptr = (void*)(new->rsp + rbp_offset_from_ret0_addr);
-      rbp2_ptr = (void**)(new->rsp + rbp1_offset_from_ret0_addr - 0x8);
-      ret2_ptr = rbp2_ptr;
+      rbp2_ptr = (void**)(new->rsp + rbp1_offset_from_ret0_addr);
+      ret2_ptr = rbp2_ptr + 1;
       //void **ret3_ptr = rbp2_ptr+1;
       //*ret3_ptr = &_nk_fiber_cleanup;
   }

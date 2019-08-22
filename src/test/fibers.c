@@ -463,10 +463,24 @@ int test_yield_to()
   f_second->input = f_third;
   f_third->input = f_fourth;
   f_fourth->input = f_first;
-  nk_fiber_run(f_fourth, FIBER_CURR_CPU_FLAG);
-  nk_fiber_run(f_first, FIBER_CURR_CPU_FLAG);
-  nk_fiber_run(f_third, FIBER_CURR_CPU_FLAG);
-  nk_fiber_run(f_second, FIBER_CURR_CPU_FLAG);
+
+  if (nk_fiber_run(f_fourth, FIBER_CURR_CPU_FLAG) < 0) {
+    nk_vc_printf("test_yield_to() : Failed to run fiber. Test aborted.\n");
+    return -2;
+  }
+  if (nk_fiber_run(f_first, FIBER_CURR_CPU_FLAG) < 0) {
+    nk_vc_printf("test_yield_to() : Failed to run fiber. Test aborted.\n");
+    return -2;
+  }
+  if (nk_fiber_run(f_third, FIBER_CURR_CPU_FLAG) < 0) {
+    nk_vc_printf("test_yield_to() : Failed to run fiber. Test aborted.\n");
+    return -2;
+  }
+  if (nk_fiber_run(f_second, FIBER_CURR_CPU_FLAG) < 0) {
+    nk_vc_printf("test_yield_to() : Failed to run fiber. Test aborted.\n");
+    return -2;
+  }
+  
   return 0;
 }
 

@@ -783,36 +783,49 @@ int nk_fiber_create(nk_fiber_fun_t fun,
 
 int nk_fiber_run(nk_fiber_t *f, int target_cpu)
 {
-  //if target_cpu <= -2 (or is invalid target_cpu), the fiber will be placed on a random fiber thread's queue
+  //if target_cpu <= -2 or target_cpu > num_cpu, an error is returned
+  
+  // system info gathered
   struct sys_info * sys = per_cpu_get(system);
   int num_cpus = sys->num_cpus;
   int t_cpu = 0;
  
   // by default state is set to the current cpu's fiber state
-  fiber_state *state = _GET_FIBER_STATE(); 
-  if (target_cpu <= FIBER_RAND_CPU_FLAG || target_cpu > num_cpus) {
-    // a random f_state is selected
-    // TODO MAC: return an error instead
-    state = _get_random_fiber_state(); 
-  } else if(target_cpu != FIBER_CURR_CPU_FLAG) {
+  // This means we only have to check to see if target_cpu != FIBER_CURR_CPU_FLAG (3 cases)
+  fiber_state *state = _GET_FIBER_STATE();
+
+  // Check to see if target_cpu is sane 
+  if (target_cpu < FIBER_RAND_CPU_FLAG || target_cpu > num_cpus) {
+    // If target_cpu is insane, return an error
+    return  -EINVAL;
+  } else if (target_cpu > FIBER_CURR_CPU_FLAG) { /* if value is greater than -1, must be specific CPU */
       //state is is set to the f_state of target_cpu
       state = sys->cpus[target_cpu]->f_state;
-    }
+  } else if(target_cpu == FIBER_RAND_CPU_FLAG) { /* RAND and CURR are only choices left */
+      // Random fiber state selected
+      state = _get_random_fiber_state();
+  } /* if target_cpu != RAND, then it must be CURR. Fiber state is already set to CURR CPU by default */
+
   // t_cpu is updated to the cpu number of the selected state 
   t_cpu = state->fiber_thread->current_cpu;
-  // Enqueues the fiber into the chosen fiber thread's queue.
-  //struct list_head *fiber_sched_queue = &(sys->cpus[curr_thread->current_cpu]->f_state->f_sched_queue);
  
   //DEBUG: Prints the fiber that is about to be enqueued and the CPU it will be enqueued on
   FIBER_DEBUG("nk_fiber_run() : about to enqueue a fiber: %p on cpu: %d\n", f, state->fiber_thread->current_cpu); 
+  
+  // Lock the fiber, change it's curr cpu, and change status to ready (since we are about to queue it)
   _LOCK_FIBER(f);
   f->curr_cpu = t_cpu;
-  f->f_status = READY; 
+  f->f_status = READY;
+  
+  // Lock the CPU fiber state and enqueue the fiber into sched queue 
   _LOCK_SCHED_QUEUE(state);
   list_add_tail(&(f->sched_node), &(state->f_sched_queue));
+  
+  // Unlock CPU fiber state and f
   _UNLOCK_SCHED_QUEUE(state);
   _UNLOCK_FIBER(f);
-  
+ 
+  // Wake up fiber thread for selected CPU (or do nothing if it is already awake)
   _wake_fiber_thread(state); 
 
   return 0;
@@ -825,11 +838,12 @@ int nk_fiber_start(nk_fiber_fun_t fun,
                    nk_fiber_t **fiber_output)
 {
   // Creates fiber and puts it into scheduling queue
-  if (nk_fiber_create(fun, input, output, stack_size, fiber_output)) {
+  if (nk_fiber_create(fun, input, output, stack_size, fiber_output) < 0) {
     return -1;
   }
-  nk_fiber_run(*fiber_output, target_cpu);
-  //__asm__ __volatile__ ("mfence" : : : "memory"); 
+  if (nk_fiber_run(*fiber_output, target_cpu) < 0) {
+    return -2;
+  }
   return 0;
 }
 

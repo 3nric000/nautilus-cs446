@@ -82,7 +82,6 @@ extern void nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
 extern void _nk_exit_switch(nk_fiber_t *next);
 extern nk_fiber_t *nk_fiber_fork();
 extern void _nk_fiber_fork_exit();
-extern void _nk_fiber_fork_exit_2();
 
 /******** INTERNAL FUNCTIONS **********/
 
@@ -134,7 +133,6 @@ static void _fiber_push(nk_fiber_t * f, uint64_t x)
 static nk_fiber_t* _rr_policy()
 {
   struct list_head *f_queue = _GET_SCHED_HEAD(); 
-  // TODO MAC: LOCK
   // Grab the first fiber from the sched queue
   nk_fiber_t *fiber_to_schedule = list_first_entry(f_queue, nk_fiber_t, sched_node); 
   if (fiber_to_schedule){
@@ -199,7 +197,6 @@ static nk_fiber_t* _rr_policy()
   state->curr_fiber = next;
   _UNLOCK_SCHED_QUEUE(state);
   
-  // TODO: is it even worth it to unlock the fiber? This might be useless
   // Unlock the fiber before free (in case we implement reaping)
   _UNLOCK_FIBER(f);
 
@@ -462,12 +459,17 @@ static int _check_yield_to(nk_fiber_t *to_del) {
      _UNLOCK_FIBER(to_del);
      return 0;
   } else {
-      // TODO MAC: What if the fiber is on own queue? Then deadlock occurs
       fiber_state *state = per_cpu_get(system)->cpus[to_del->curr_cpu]->f_state;
+      // Prevents deadlock by avoiding lock if to_del is on own queue
+      if (state == _GET_FIBER_STATE()) {
+        list_del_init(&(to_del->sched_node));
+        _UNLOCK_FIBER(to_del);
+      } else {
       _LOCK_SCHED_QUEUE(state);
       list_del_init(&(to_del->sched_node));
       _UNLOCK_FIBER(to_del);
       _UNLOCK_SCHED_QUEUE(state);
+      }
       return 1;
   }
 }
@@ -660,6 +662,50 @@ static void _debug_yield(nk_fiber_t *f_to)
 }
 #endif
 
+// ******* WRAPPER NK FIBER YIELD *******
+static uint64_t rdtsc_time = 0;
+static uint64_t data[10000];
+static int a = 0;
+
+int wrapper_nk_fiber_yield()
+{
+// nk_vc_printf("wrapper_nk_fiber_yield : running\n");
+  uint64_t curr_time = rdtsc();
+  // nk_vc_printf("Interval time : %d\n", curr_time - rdtsc_time);
+  data[a] = curr_time - rdtsc_time;
+  rdtsc_time = curr_time;
+  a++; 
+  return nk_fiber_yield();
+}
+void print_data()
+{
+  int i;
+  for (i = 0; i < a; i++) {
+    nk_vc_printf("%d interval: %d\n", i, data[i]);
+  } 
+    /*
+     * // Variance calculation
+     * uint64_t N = a;
+     * uint64_t sumOfSquares = 0;
+     * uint64_t total = 0;
+     * uint64_t mean = 0;
+     *  for (i = 0; i < a; i++) {
+     *    total += data[i]; 
+     *  }
+     *  mean = total / N; 
+     *  for (i = 0; i < a; i++) {
+     *    uint64_t diff = data[i] - mean;
+     *    sumOfSquares += (diff * diff);
+     *  } 
+     *  long double variance = sumOfSquares / N;
+     *  nk_vc_printf("VARIANCE OF DATA SET: %d\n", variance);
+     */ 
+    memset(data, 0, sizeof(data));
+    a = 0;
+    rdtsc_time = 0;
+    return;
+}  
+
 /******** EXTERNAL FUNCTIONS **********/
 
 int nk_fiber_create(nk_fiber_fun_t fun,
@@ -672,7 +718,7 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   nk_fiber_t *fiber = NULL;
 
   // Get stack size
-  nk_stack_size_t required_stack_size = stack_size ? stack_size: PAGE_SIZE;
+  nk_stack_size_t required_stack_size = stack_size ? stack_size: PAGE_SIZE_4KB;
 
   // Allocate space for a fiber
   fiber = malloc(sizeof(nk_fiber_t));
@@ -680,6 +726,7 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   // Check if an error happened when allocating space for a nk_fiber_t
   if (!fiber) {
     // Print error here
+    panic("nk_fiber_create() : Malloc failed. Unable to create fiber.\n");
     return -EINVAL;
   }
 
@@ -699,6 +746,7 @@ int nk_fiber_create(nk_fiber_fun_t fun,
     // Print error here
     // Free the previously allocated nk_fiber_t
     free(fiber);
+    panic("nk_fiber_create() : Malloc failed. Unable to create fiber.\n");
     return -EINVAL;
   }
 
@@ -817,6 +865,9 @@ int nk_fiber_yield()
 
 int nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag)
 {
+  // Locks fiber state
+  fiber_state *state = _GET_FIBER_STATE();
+  _LOCK_SCHED_QUEUE(state);
   // Remove f_to from its respective fiber queue (need to check all CPUs)
   // This is currently not safe, fiber may be running and therefore not in sched queue
   if (!(_check_yield_to(f_to))){
@@ -824,11 +875,10 @@ int nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag)
     FIBER_DEBUG("nk_fiber_yield_to() : Failed to find fiber in queues :(\n");
     if (earlyRetFlag) {
       FIBER_DEBUG("nk_fiber_yield_to() : early ret flag set, returning early\n");
+      _UNLOCK_SCHED_QUEUE(state);
       return -1;
     }
     
-    fiber_state *state = _GET_FIBER_STATE();
-    _LOCK_SCHED_QUEUE(state);
     nk_fiber_t *new_to = _rr_policy();
     _UNLOCK_SCHED_QUEUE(state);
     
@@ -848,6 +898,7 @@ int nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag)
   }
 
   // Use utility function to perform rest of yield
+  _UNLOCK_SCHED_QUEUE(state);
   _nk_fiber_yield_to(f_to);
   
   // returns 0 to indicate we successfully yielded to f_to
@@ -963,8 +1014,6 @@ nk_fiber_t *__nk_fiber_fork()
       *rbp_stash_ptr = (void*)(new->rsp + rbp_offset_from_ret0_addr);
       rbp2_ptr = (void**)(new->rsp + rbp1_offset_from_ret0_addr);
       ret2_ptr = rbp2_ptr + 1;
-      //void **ret3_ptr = rbp2_ptr+1;
-      //*ret3_ptr = &_nk_fiber_cleanup;
   }
  
   FIBER_DEBUG("__nk_fiber_fork() : rbp1_offset_from_ret0_addr: %p, rbp2_ptr: %p, ret2_ptr: %p\n", rbp1_offset_from_ret0_addr, rbp2_ptr, ret2_ptr);

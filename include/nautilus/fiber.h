@@ -52,7 +52,7 @@ typedef struct nk_thread nk_thread_t;
 #define FSTACK_1MB 0x100000
 #define FSTACK_2MB 0x200000
 
-/******** EXTERNAL INTERFACE **********/
+/********** EXTERNAL INTERFACE **********/
 
 typedef void (*nk_fiber_fun_t)(void *input, void **output);
 
@@ -152,7 +152,15 @@ int nk_fiber_init_ap();
 
 void nk_fiber_startup();
 
+/********** WRAPPER NK FIBER YIELD **********/
+
+int wrapper_nk_fiber_yield();
+
+void print_data();
+
+
 #endif /* !__ASSEMBLER */
+
 
 #define FIBER_SAVE_GPRS() \
     movq %rax, -8(%rsp); \

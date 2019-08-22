@@ -300,8 +300,9 @@ void first_timer(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  uint64_t start = 0;
-  uint64_t end = 0;
+  rdtsc();
+  uint64_t start = rdtsc();
+  uint64_t end = rdtsc();
   while(a < N){
     if (a == 2) {
         start = rdtsc();

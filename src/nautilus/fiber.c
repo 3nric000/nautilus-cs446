@@ -78,10 +78,11 @@ typedef struct nk_fiber_percpu_state {
     nk_fiber_t *idle_fiber; /* points to this CPU's idle fiber */
     struct list_head f_sched_queue; /* sched queue for fibers on this CPU (can be accessed by other CPUs) */
     struct nk_wait_queue *waitq; /* Wait queue that the fiber thread can sleep on */
+    int fork_cpu; /* Determines which CPU forked fibers will be placed on. Default => curr CPU */
 } fiber_state;
 
 /* These functions are implemented in assembly. Can be found in src/asm/fiber_lowlevel.S */
-extern void nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
+extern void _nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
 extern void _nk_exit_switch(nk_fiber_t *next);
 extern nk_fiber_t *nk_fiber_fork();
 extern void _nk_fiber_fork_exit();
@@ -372,7 +373,7 @@ static int _nk_fiber_yield_to(nk_fiber_t *f_to)
   }
 
   // Begin context switch (register saving and stack switch)
-  nk_fiber_context_switch(f_from, f_to);
+  _nk_fiber_context_switch(f_from, f_to);
   return 0;
 }
 
@@ -410,7 +411,7 @@ static int _nk_fiber_join_yield()
   f_to->curr_cpu = my_cpu_id();
   f_to->f_status = RUN;
   _UNLOCK_FIBER(f_to);
-  nk_fiber_context_switch(f_from, f_to);
+  _nk_fiber_context_switch(f_from, f_to);
   return 0;
 } 
 
@@ -511,6 +512,8 @@ static struct nk_fiber_percpu_state *init_local_fiber_state()
     INIT_LIST_HEAD(&(state->f_sched_queue));
     
     state->waitq = nk_wait_queue_create("fib");
+    
+    state->fork_cpu = F_CURR_CPU;
  
     return state;
 
@@ -1078,8 +1081,9 @@ int nk_fiber_conditional_yield_to(nk_fiber_t *fib, uint8_t (*cond_function)(void
  */
 nk_fiber_t *__nk_fiber_fork()
 {
-  // Fetch current fiber
-  nk_fiber_t *curr = nk_fiber_current();
+  // Fetch current fiber and fiber state
+  fiber_state *state = _GET_FIBER_STATE();
+  nk_fiber_t *curr = state->curr_fiber;
 
   // Variables needed to hold stack frame information
   uint64_t size, alloc_size;
@@ -1194,8 +1198,11 @@ nk_fiber_t *__nk_fiber_fork()
   *(uint64_t*)(new->rsp+GPR_RAX_OFFSET) = 0x0;
 
   // Add the forked fiber to the sched queue
-  // TODO MAC: make choice of cpu you put forked fiber on visible
-  nk_fiber_run(new, F_CURR_CPU); 
+  if (nk_fiber_run(new, state->fork_cpu) < 0) {
+    free(new->stack);
+    free(new);
+    return (nk_fiber_t*)-EINVAL;
+  } 
   
   return new;
 }
@@ -1205,7 +1212,7 @@ nk_fiber_t *__nk_fiber_fork()
  *
  * Puts the curr_fiber onto wait_on's wait queue
  *
- * wait_on: the fiber whose wait queue we will be placed onto 
+ * @wait_on: the fiber whose wait queue we will be placed onto 
  *
  * on failure (wait_on is NULL or is exiting/done), returns -1
  * on success, returns the return value of _nk_fiber_join_yield
@@ -1229,7 +1236,6 @@ int nk_fiber_join(nk_fiber_t *wait_on)
     _UNLOCK_FIBER(wait_on);
     return -1;
   }
-  // TODO MAC: Make sure this doesn't cause problems
   wait_on->curr_cpu = -1;
   struct list_head *wait_q = &(wait_on->wait_queue);
   list_add_tail(&(curr_fiber->wait_node), wait_q);
@@ -1256,5 +1262,35 @@ void nk_fiber_set_vc(struct nk_virtual_console *vc)
   // Changes the vc of current fiber and the current thread
   curr_fiber->vc = vc;
   get_cur_thread()->vc = vc;
+}
+
+/* 
+ * nk_fiber_set_fork_cpu
+ *
+ * Changes the default fork cpu for the current CPU
+ *
+ * @target_cpu: the desired CPU to set as default
+ *
+ * returns -1 on failure, 0 otherwise
+ */
+int nk_fiber_set_fork_cpu(int target_cpu)
+{
+  // Gets the current fiber state
+  fiber_state *state = _GET_FIBER_STATE();
+
+  // Gets System info (CPU num)
+  struct sys_info * sys = per_cpu_get(system);
+  int num_cpus = sys->num_cpus;
+
+  // Determines whether target_cpu is sane
+  if (target_cpu >= 0 && target_cpu <= num_cpus) {
+    _LOCK_SCHED_QUEUE(state);
+    state->fork_cpu = target_cpu;
+    _UNLOCK_SCHED_QUEUE(state);
+    return 0;
+  }
+
+  // Getting this far indicates failure to change fork's CPU
+  return -1;
 }
 

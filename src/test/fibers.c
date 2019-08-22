@@ -351,7 +351,7 @@ void second_timer(void *i, void **o)
   nk_vc_printf("Second Timer is finished, a = %d\n", a);
 }
 
-extern void nk_fiber_context_switch(nk_fiber_t *curr, nk_fiber_t *next);
+extern void _nk_fiber_context_switch(nk_fiber_t *curr, nk_fiber_t *next);
 
 void first_lower(void *i, void **o)
 {
@@ -363,7 +363,7 @@ void first_lower(void *i, void **o)
     if (a == 2) {
         start = rdtsc();
     }
-    nk_fiber_context_switch(first_l, second_l);
+    _nk_fiber_context_switch(first_l, second_l);
     a++;
   }
   end = rdtsc();
@@ -375,7 +375,7 @@ void second_lower(void *i, void **o)
   nk_fiber_set_vc(vc);
   int a = 0;
   while(a < N){
-    nk_fiber_context_switch(second_l, first_l);
+    _nk_fiber_context_switch(second_l, first_l);
     a++;
   }
   nk_vc_printf("Second Timer is finished, a = %d\n", a);

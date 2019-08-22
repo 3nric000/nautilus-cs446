@@ -471,27 +471,30 @@ static fiber_state *_get_random_fiber_state()
   return sys->cpus[random_cpu]->f_state;
 }
 
-// Checks if to_del is on it curr_cpu's wait queue
-// returns 1 if it is on wait queue, 0 if not
+// Checks if to_del is on a sched queue (ready to be switched to)
+// returns -EINVAL if not ready, otherwise returns 0
 static int _check_yield_to(nk_fiber_t *to_del) {
   _LOCK_FIBER(to_del);
+  // If the fiber isn't ready to switch to, indicate failure.
   if (to_del->f_status != READY) {
      FIBER_DEBUG("_check_yield_to() : to_del's status is %s\n", to_del->f_status);
      _UNLOCK_FIBER(to_del);
-     return 0;
-  } else {
+     return -EINVAL;
+  } else { /* The fiber is ready, so we will take it from its queue so we can use it */
+      // Gets the fiber state of the CPU of the target fiber
       fiber_state *state = per_cpu_get(system)->cpus[to_del->curr_cpu]->f_state;
-      // Prevents deadlock by avoiding lock if to_del is on own queue
+      
+      // Prevents deadlock by avoiding lock if to_del is on own queue (would spin forever)
       if (state == _GET_FIBER_STATE()) {
         list_del_init(&(to_del->sched_node));
         _UNLOCK_FIBER(to_del);
-      } else {
+      } else { 
       _LOCK_SCHED_QUEUE(state);
       list_del_init(&(to_del->sched_node));
       _UNLOCK_FIBER(to_del);
       _UNLOCK_SCHED_QUEUE(state);
       }
-      return 1;
+      return 0;
   }
 }
 
@@ -771,7 +774,7 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   nk_fiber_t *fiber = NULL;
 
   // Get stack size
-  nk_stack_size_t required_stack_size = stack_size ? stack_size: PAGE_SIZE_4KB;
+  nk_stack_size_t required_stack_size = stack_size ? stack_size: FSTACK_4KB;
 
   // Allocate space for a fiber
   fiber = malloc(sizeof(nk_fiber_t));
@@ -987,34 +990,38 @@ int nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag)
   _LOCK_SCHED_QUEUE(state);
   // Remove f_to from its respective fiber queue (need to check all CPUs)
   // This is currently not safe, fiber may be running and therefore not in sched queue
-  if (!(_check_yield_to(f_to))){
+  if (_check_yield_to(f_to) < 0){
     //DEBUG: Will indicate whether the fiber we're attempting to yield to was not found
     FIBER_DEBUG("nk_fiber_yield_to() : Failed to find fiber in queues :(\n");
+    
+    // If early ret flag is set, we will indicate failure instead of yielding to random fiber
     if (earlyRetFlag) {
-      FIBER_DEBUG("nk_fiber_yield_to() : early ret flag set, returning early\n");
       _UNLOCK_SCHED_QUEUE(state);
+      FIBER_DEBUG("nk_fiber_yield_to() : early ret flag set, returning early\n");
       return -1;
     }
     
+    // early ret flag not set, so we find a random fiber to yield to instead
     nk_fiber_t *new_to = _rr_policy();
     _UNLOCK_SCHED_QUEUE(state);
     
+    // Checks to see if we received a valid fiber from _rr_policy (NULL = no fibers to schedule)
     if (!(new_to)) { 
-      if (state->curr_fiber->is_idle) {
+      if (state->curr_fiber->is_idle) { /* if no fiber to sched and curr idle, no reason to switch */
         return 0;
         //FIBER_INFO("nk_fiber_yield() : yield aborted. Returning 0\n");
-      } else {
+      } else { /* if no fiber to sched and not currenty in idle fiber, switch to idle fiber */
           new_to = state->idle_fiber;
         }
     }
  
-    // If the fiber could not be found, we need to yield to a random fiber instead
+    // If the fiber could not be found, we yield to a random fiber instead
     _nk_fiber_yield_to(new_to);
     // Return 1 to indicate partial failure
     return 1;
   }
 
-  // Use utility function to perform rest of yield
+  // Use utility function to perform rest of yield 
   _UNLOCK_SCHED_QUEUE(state);
   _nk_fiber_yield_to(f_to);
   
@@ -1049,18 +1056,21 @@ int nk_fiber_conditional_yield(uint8_t (*cond_function)(void *param), void *stat
  * Will yield execution to specified fiber if condition holds
  *
  * @fib: fiber to yield to
+ * @earlyRetFlag: whether to return early if f_to is not available to yield to. 
+ *                YIELD_TO_EARLY_RET => don't yield to rand fiber if f_to unavailable
+ *                Any other int => yield to random fiber fiber if f_to unavailable
  * @cond_function: conditional function for checking whether or not to yield. 
  *                  cond_function returns true (any val but 0) => yield
  * @state: The state passed to cond_function. 
  *
  * on failed condition (no yield), returns 1.
- * on successful yield, returns the return value of nk_fiber_yield_to.
+ * on true condition, returns the return value of nk_fiber_yield_to.
  */
 //TODO MAC: Talk with Prof. Dinda about race condition in this, too.
-int nk_fiber_conditional_yield_to(nk_fiber_t *fib, uint8_t (*cond_function)(void *param), void *state)
+int nk_fiber_conditional_yield_to(nk_fiber_t *f_to, int earlyRetFlag, uint8_t (*cond_function)(void *param), void *state)
 {
   if (cond_function(state)){
-    return nk_fiber_yield_to(fib, 0);
+    return nk_fiber_yield_to(f_to, earlyRetFlag);
   }
   return 1;
 }

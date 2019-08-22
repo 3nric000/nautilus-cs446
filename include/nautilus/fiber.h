@@ -85,6 +85,7 @@ typedef struct nk_fiber {
   int num_wait;             // number of fibers on this fiber's wait queue
 
   // List for keeping track of fiber's children
+  // TODO MAC: Not implemented, not sure if useful
   struct list_head fiber_children;
   struct list_head child_node;
   int num_children;
@@ -99,10 +100,9 @@ typedef struct nk_fiber {
   uint8_t is_done; //indicates whether the fiber is done (for reaping?)
 } nk_fiber_t;
 
-// Returns the fiber that is currently running
+// Returns the fiber that is currently running on this CPU
 nk_fiber_t *nk_fiber_current();
 
-// TODO MAC: Reformat to make function header span multiple lines
 // Create a fiber but do not launch it
 int nk_fiber_create(nk_fiber_fun_t fun,
                     void *input,
@@ -110,11 +110,10 @@ int nk_fiber_create(nk_fiber_fun_t fun,
                     nk_stack_size_t stack_size,
                     nk_fiber_t **fiber_output);
 
-// TODO MAC: Have this take CPU instead of flag (-1 is any CPU, otherwise choose specific CPU)
 // Launch a previously created fiber
 int nk_fiber_run(nk_fiber_t *f, int target_cpu);
 
-// Create and launch a fiber
+// Create and launch a fiber.
 int nk_fiber_start(nk_fiber_fun_t fun,
                    void *input,
                    void **output,
@@ -122,30 +121,45 @@ int nk_fiber_start(nk_fiber_fun_t fun,
                    int target_cpu,
                    nk_fiber_t **fiber_output);
 
-// Default yield function, implemented on top of conditional yield
+// Default yield function. Forces the current running fiber to yield execution.
+// Switches execution to randomly selected fiber.
+// returns -1 on failure (called outside of fiber thread)
+// returns 1 on early exit (idle fiber tries to yield to itself)
+// returns 0 otherwise 
 int nk_fiber_yield();
 
-// Yield that allows choice of fiber to yield to
-// Will yield to a random fiber if f_to is not available to yield to
-int nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag);
-
-// Takes a fiber to yield to, a condition to yield on, and a function to check that condition
-// returns 1 if the fiber does not yield
-int nk_fiber_conditional_yield_to(nk_fiber_t *fib, uint8_t (*cond_function)(void *param), void *state);
-
 // Takes a fiber, a condition to yield on, and a function to check that condition
-// returns 1 if the fiber does not yield
+// returns 1 if the fiber does not yield, otherwise returns ret value of nk_fiber_yield 
 int nk_fiber_conditional_yield(uint8_t (*cond_function)(void *param), void *state);
 
-// returns a copy of the currently running fiber with a new FID
+// Yield that allows choice of fiber to
+// if earlyRetFlag == YIELD_TO_EARLY_RET => fiber will not yield if f_to not available
+// else, fiber will yield to random fiber when f_to not available to switch to
+// returns -1 on early ret, 1 on yield to rand fiber, 0 on yield to f_to
+int nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag);
+
+// Takes a fiber to yield to, earlyRetFlag, a condition to yield on, and a function to check that condition
+// returns -1 if the fiber does not yield, otherwise returns ret value of nk_fiber_yield_to
+int nk_fiber_conditional_yield_to(nk_fiber_t *f_to, int earlyRetFlag, uint8_t (*cond_function)(void *param), void *state);
+
+// fork the current fiber 
+//   - fiber address of child returned to parent
+//   - 0 is returned to child
+//   - child runs until it returns from the 
+//     current function, which returns into
+//     the fiber cleanup function instead of
+//     to the caller
+// on error, parent is returned (nk_fiber_t*)-EINVAL
 nk_fiber_t *nk_fiber_fork();
 
-// Causes the currently running fiber to wait on the specified fiber 
+// Causes the currently running fiber to wait on the specified fiber's wait queue (waits until that fiber exits) 
 int nk_fiber_join(nk_fiber_t *wait_on);
 
-// Set virtual console
+// Set virtual console of the current fiber
 void nk_fiber_set_vc(struct nk_virtual_console *vc);
 
+
+// Used to start fibers on bootup
 int nk_fiber_init();
 
 int nk_fiber_init_ap();
@@ -215,6 +229,8 @@ void print_data();
     movq 104(%rsp), %rbx; \
     addq $120, %rsp; 
 
+/******* Experimental way to context switch *******/
+
 /*
 #define FIBER_SAVE_GPRS() \
     movq %rax, -8(%rsp); \
@@ -254,22 +270,6 @@ void print_data();
     movq 112(%rsp), %rax; \
     addq $120, %rsp;
 
-#define FIBER_RESTORE_GPRS_NOT_RAX() \
-    movq (%rsp), %r15; \
-    movq 8(%rsp), %r14; \
-    movq 16(%rsp), %r13; \
-    movq 24(%rsp), %r12; \
-    movq 32(%rsp), %r11; \
-    movq 40(%rsp), %r10; \
-    movq 48(%rsp), %r9; \
-    movq 56(%rsp), %r8; \
-    movq 64(%rsp), %rbp; \
-    movq 72(%rsp), %rdi; \
-    movq 80(%rsp), %rsi; \
-    movq 88(%rsp), %rdx; \
-    movq 96(%rsp), %rcx; \
-    movq 104(%rsp), %rbx; \
-    addq $120, %rsp; 
 */
 
 

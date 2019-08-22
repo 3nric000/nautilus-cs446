@@ -42,8 +42,8 @@ extern "C" {
 
 typedef uint64_t nk_stack_size_t;
 typedef struct nk_thread nk_thread_t;
-#define FIBER_RAND_CPU_FLAG -2
-#define FIBER_CURR_CPU_FLAG -1
+#define F_RAND_CPU -2
+#define F_CURR_CPU -1
 #define YIELD_TO_EARLY_RET 1
 
 /* common thread stack sizes */

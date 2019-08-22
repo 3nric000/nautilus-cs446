@@ -726,7 +726,7 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   // Check if an error happened when allocating space for a nk_fiber_t
   if (!fiber) {
     // Print error here
-    panic("nk_fiber_create() : Malloc failed. Unable to create fiber.\n");
+    //panic("nk_fiber_create() : Malloc failed. Unable to create fiber.\n");
     return -EINVAL;
   }
 
@@ -746,7 +746,7 @@ int nk_fiber_create(nk_fiber_fun_t fun,
     // Print error here
     // Free the previously allocated nk_fiber_t
     free(fiber);
-    panic("nk_fiber_create() : Malloc failed. Unable to create fiber.\n");
+    //panic("nk_fiber_create() : Malloc failed. Unable to create fiber.\n");
     return -EINVAL;
   }
 
@@ -974,7 +974,8 @@ nk_fiber_t *__nk_fiber_fork()
   nk_fiber_t *new;
   nk_fiber_create(NULL, NULL, 0, alloc_size, &new);
   if (!new) {
-    panic("__nk_fiber_fork() : could not allocate new fiber. Fork failed.\n");
+    //panic("__nk_fiber_fork() : could not allocate new fiber. Fork failed.\n");
+    return (nk_fiber_t*)-EINVAL;
   }
   child_stack = new->stack;
    

@@ -457,7 +457,6 @@ static int _wake_fiber_thread(fiber_state *state)
   #endif
 
   #if NAUT_CONFIG_ENABLE_WAIT 
-  // TODO MAC: Lock the sched queue before checking if it's empty
   if (!(list_empty_careful(&(state->waitq->list)))) {
     nk_wait_queue_wake_one_extended(state->waitq, 1);
   }
@@ -1258,13 +1257,17 @@ int nk_fiber_join(nk_fiber_t *wait_on)
     _UNLOCK_FIBER(wait_on);
     return -1;
   }
+  // Change wait_on's curr CPU since it will no longer be associated with one
   wait_on->curr_cpu = -1;
+
+  // Adding curr_fiber to wait_on's wait queue
   struct list_head *wait_q = &(wait_on->wait_queue);
   list_add_tail(&(curr_fiber->wait_node), wait_q);
   wait_on->num_wait++;
+
+  // Update status of curr_fiber and yield
   curr_fiber->f_status = WAIT;
   _UNLOCK_FIBER(wait_on);
-  // TODO: Could also attempt to yield directy to wait_on (might speed up wait time)?
   return _nk_fiber_join_yield();
 }
 

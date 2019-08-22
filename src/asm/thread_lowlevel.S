@@ -211,7 +211,7 @@ ENTRY(nk_thread_entry)
 #endif
 
     sti
-    retq // ENRICO: return to the return address that we set
+    retq 
 
 #ifdef NAUT_CONFIG_ENABLE_STACK_CHECK
 bad:

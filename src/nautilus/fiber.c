@@ -136,9 +136,11 @@ static void _fiber_push(nk_fiber_t * f, uint64_t x)
 // Returns NULL if no fiber is available in the curr CPU's sched queue
 static nk_fiber_t* _rr_policy()
 {
-  struct list_head *f_queue = _GET_SCHED_HEAD(); 
   // Grab the first fiber from the sched queue
+  struct list_head *f_queue = _GET_SCHED_HEAD(); 
   nk_fiber_t *fiber_to_schedule = list_first_entry(f_queue, nk_fiber_t, sched_node); 
+  
+  // If sched queue not empty, fiber_to_schedule != NULL
   if (fiber_to_schedule){
     // Remove the fiber from the sched queue
     list_del_init(&(fiber_to_schedule->sched_node));
@@ -165,7 +167,7 @@ static void _nk_fiber_exit(nk_fiber_t *f)
   // Grab the fiber state of the current cpu
   fiber_state *state = _GET_FIBER_STATE();
 
-  // next will be the fiber we're switching to (might be idle fiber)
+  // next will be the fiber we switch to (might be idle fiber)
   nk_fiber_t *next = NULL;
   
   // DEBUG: Prints out the exiting fiber's wait queue size
@@ -177,20 +179,24 @@ static void _nk_fiber_exit(nk_fiber_t *f)
   // DEBUG: Prints out wait queue address, head, and tail.
   FIBER_DEBUG("_nk_fiber_exit() : The wait queue of size %d is %p on fiber %p\n", f->num_wait, waitq, f);
 
-  while(f->num_wait > 0){
-    
+  while (f->num_wait > 0) {
     // Dequeue a fiber from the waitq
     temp = list_first_entry(waitq, nk_fiber_t, wait_node);
     list_del_init(&(temp->wait_node));
     f->num_wait--;
+
     // DEBUG: Prints out what fibers are in waitq and what the waitq size is
     //FIBER_DEBUG("_nk_fiber_exit() : In waitq loop. Temp is %p and size is %d\n", temp, waitq->size);
+    
+    // if temp is a valid fiber, add it to a random sched queue
     if (temp){
+      nk_fiber_run(temp, F_RAND_CPU);
+
       // DEBUG: prints the number of fibers that temp is waiting on
       FIBER_DEBUG("_nk_fiber_exit() : restarting fiber %p on wait_queue %p\n", temp, waitq);
-      nk_fiber_run(temp, F_RAND_CPU);
     }
   }
+
   // Mark the current fiber as done (since we are exiting)
   f->is_done = 1;
 
@@ -206,7 +212,7 @@ static void _nk_fiber_exit(nk_fiber_t *f)
   // Unlock the fiber before free (in case we implement reaping)
   _UNLOCK_FIBER(f);
 
-  // Free the current fiber's memory (stack, stack ptr, and wait queue)
+  // Free the current fiber's memory (stack and fiber structure)
   free(f->stack);
   free(f);
   
@@ -220,13 +226,12 @@ static void _nk_fiber_exit(nk_fiber_t *f)
 static void _fiber_wrapper(nk_fiber_t* f_to)
 {
   // Execute fiber function
-  //FIBER_DEBUG("_fiber_wrapper BEGIN\n");
   f_to->fun(f_to->input, f_to->output);
-  //FIBER_DEBUG("_fiber_wrapper END\n");
 
+  FIBER_DEBUG("_nk_fiber_exit() : exiting from fiber %p\n", f_to);
+  
   // Exit when fiber function ends
   // Starts each fiber on f's wait queue and switches stacks to idle fiber
-  //FIBER_DEBUG("_nk_fiber_exit() : exiting from fiber %p\n", f_to);
   _nk_fiber_exit(f_to);
 
   return;
@@ -256,15 +261,17 @@ static void _fiber_wrapper(nk_fiber_t* f_to)
  *|________________________|
  *
  * Order of GPRs can be found in include/nautilus/fiber.h
- * All values except %rdi are dummy values.
- * %rdi's stack position will contain ptr to fiber (stack).
+ * All values except %rdi are dummy values when debug enabled.
+ * All values except %rdi are 0 when debugging not enabled.
+ * %rdi's stack position will contain ptr to fiber (stack ptr).
  * We use this setup in context switch assembly code
  * to help us switch stacks.
+ *
  * We pop these values off the stack and ptr to fiber
  * will go into %rdi which is first argument register. We
  * can then retq to Fiber Wrapper and the first argument will
- * be the fiber in  %rdi. This allows us to run the routine
- * held in the fiber structure.
+ * be the fiber in %rdi. This allows us to run the routine
+ * held in the fiber structure with the proper input and output.
  *
  */
 
@@ -279,14 +286,14 @@ static void _nk_fiber_init(nk_fiber_t *f)
   _fiber_push(f, 0xdeadbeef12345671ul);
   _fiber_push(f, 0xdeadbeef12345672ul);
   _fiber_push(f, 0xdeadbeef12345673ul);
-  _fiber_push(f, 0x0ul);
+  _fiber_push(f, 0xdeadbeef12345674ul);
   _fiber_push(f, (uint64_t) f);
-  _fiber_push(f, 0x0ul);
+  _fiber_push(f, 0x0ul); /* RBP, do not want this to be sentinent value */
   _fiber_push(f, 0xdeadbeef12345676ul);
   _fiber_push(f, 0xdeadbeef12345677ul);
   _fiber_push(f, 0xdeadbeef12345678ul);
   _fiber_push(f, 0xdeadbeef12345679ul);
-  _fiber_push(f, 0x0ul);
+  _fiber_push(f, 0xdeadbeef1234567aul);
   _fiber_push(f, 0xdeadbeef1234567bul);
   _fiber_push(f, 0xdeadbeef1234567cul);
   _fiber_push(f, 0xdeadbeef1234567dul);
@@ -328,6 +335,7 @@ static int _nk_fiber_yield_to(nk_fiber_t *f_to)
   // Get the current fiber and lock it
   fiber_state *state = _GET_FIBER_STATE();
   nk_fiber_t *f_from = state->curr_fiber;
+
   // If a fiber is not waiting or exiting, change its status to yielding
   if (f_from->f_status == READY && !(f_from->is_idle)) {
     f_from->f_status = YIELD;
@@ -355,8 +363,8 @@ static int _nk_fiber_yield_to(nk_fiber_t *f_to)
   
   // Enqueue the current fiber (if it is not the idle fiber)
   if (!(f_from->is_idle)) {
-    _LOCK_SCHED_QUEUE(state);
     // Gets the sched queue for the current CPU
+    _LOCK_SCHED_QUEUE(state);
     struct list_head *fiber_sched_queue = &(state->f_sched_queue);
      
     // DEBUG: Prints the fiber that's about to be enqueued
@@ -391,26 +399,26 @@ static int _nk_fiber_join_yield()
   if (!(f_to)) { 
     if (f_from->is_idle) {
       // Should never come from the idle fiber
+      panic("Attempted to call yield_to from idle fiber. Should never happen!\n");
       return -1;
     } else {
         f_to = state->idle_fiber;
-      }
-  }
-   
-  //FIBER_INFO("Got here in fiber join\n"); 
-  // Begin context switch (register saving, state update, and stack change)
-
+    }
+  } 
   state->curr_fiber = f_to;
   
   // Change the vc of the current thread if we aren't switching away from the idle fiber
   if (!f_from->is_idle){ 
     nk_fiber_set_vc(f_from->vc);
   }
-  
+ 
+  // Update f_to info and status 
   _LOCK_FIBER(f_to);
   f_to->curr_cpu = my_cpu_id();
   f_to->f_status = RUN;
   _UNLOCK_FIBER(f_to);
+
+  // Begin context switch (register saving and stack change)
   _nk_fiber_context_switch(f_from, f_to);
   return 0;
 } 
@@ -418,6 +426,7 @@ static int _nk_fiber_join_yield()
 // Cleans up forked fibers since they do not get cleaned up by _fiber_wrapper
 static void _nk_fiber_cleanup()
 {
+  // Figure out what the current fiber is and exit from it
   nk_fiber_t *curr = nk_fiber_current();
   FIBER_DEBUG("_nk_fiber_cleanup() : starting fiber cleanup on %p\n", curr);
   _nk_fiber_exit(curr);
@@ -435,21 +444,25 @@ static inline uint64_t _get_random()
 static int _wake_fiber_thread(fiber_state *state)
 {
   #if NAUT_CONFIG_ENABLE_SLEEP
-  nk_thread_t *curr_thread = get_cur_thread();
+  nk_thread_t *curr_thread = state->fiber_thread;
   // Wake up fiber thread if it is sleeping (so it can schedule & run fibers)
-  if (curr_thread->timer){
+  if (curr_thread->timer) {
     //DEBUG: Prints info whenever a fiber thread is awakened
     FIBER_DEBUG("nk_fiber_run() : waking fiber thread\n");
     FIBER_DEBUG("nk_fiber_run() : curr_thread = %p named %s, timer = %p named %s, cpu = %d \n", curr_thread, curr_thread->name, curr_thread->timer, curr_thread->timer->name, curr_thread->current_cpu);
+
+    // Cancel the timer for the desired fiber thread
     nk_timer_cancel(curr_thread->timer);
   }
   #endif
+
   #if NAUT_CONFIG_ENABLE_WAIT 
   // TODO MAC: Lock the sched queue before checking if it's empty
   if (!(list_empty_careful(&(state->waitq->list)))) {
     nk_wait_queue_wake_one_extended(state->waitq, 1);
   }
   #endif
+  // NAUT_CONFIG_ENABLE_SPIN case: No need to wake, so just return 0
   return 0;
 }
 
@@ -779,7 +792,7 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   // Allocate space for a fiber
   fiber = malloc(sizeof(nk_fiber_t));
 
-  // Check if an error happened when allocating space for a nk_fiber_t
+  // Check if malloc for nk_fiber_t struct failed
   if (!fiber) {
     // Print error here
     //panic("nk_fiber_create() : Malloc failed. Unable to create fiber.\n");
@@ -790,16 +803,16 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   memset(fiber, 0, sizeof(nk_fiber_t));
   
   // Set fiber status to init
-  fiber->f_status = INIT; 
+  fiber->f_status = INIT;
+ 
   // Set stack size
   fiber->stack_size = required_stack_size;
  
   // Allocate stack space
   fiber->stack = (void*) malloc(required_stack_size);
 
-  // Check if an error happened when allocating space for the stack
+  // Check if malloc for the stack failed
   if (!fiber->stack){
-    // Print error here
     // Free the previously allocated nk_fiber_t
     free(fiber);
     //panic("nk_fiber_create() : Malloc failed. Unable to create fiber.\n");
@@ -814,10 +827,11 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   // Initialize the fiber's stack
   _nk_fiber_init(fiber);
 
-  // Return the fiber
+  // Return the fiber 
   if (fiber_output){
     *fiber_output = fiber;
   }
+
   fiber->vc = get_cur_thread()->vc;
 
   // Initialize the fiber's spinlock
@@ -830,7 +844,7 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   INIT_LIST_HEAD(&(fiber->wait_queue)); 
   INIT_LIST_HEAD(&(fiber->wait_node)); 
   
-  // Initializes child fiber list
+  // Initializes child fiber list TODO: Not used yet
   INIT_LIST_HEAD(&(fiber->fiber_children));
   INIT_LIST_HEAD(&(fiber->child_node));
 
@@ -849,16 +863,14 @@ int nk_fiber_create(nk_fiber_fun_t fun,
  * on error (invalid target_cpu), returns -EINVAL, otherwise 0.
  */
 int nk_fiber_run(nk_fiber_t *f, int target_cpu)
-{
-  //if target_cpu <= -2 or target_cpu > num_cpu, an error is returned
-  
+{ 
   // system info gathered
   struct sys_info * sys = per_cpu_get(system);
   int num_cpus = sys->num_cpus;
   int t_cpu = 0;
  
-  // by default state is set to the current cpu's fiber state
-  // This means we only have to check to see if target_cpu != F_CURR_CPU (3 cases)
+  // by default, the state is set to the current cpu's fiber state
+  // This means we only have to update state if target_cpu != F_CURR_CPU (3 cases)
   fiber_state *state = _GET_FIBER_STATE();
 
   // Check to see if target_cpu is sane 
@@ -956,14 +968,14 @@ int nk_fiber_yield()
   #endif
 
   // If f_to is NULL, there are no fibers in the queue
-  // We can then exit early and sleep
-  
+  // We can either exit early and sleep (if curr_fiber is idle)
+  // Or we can switch to the idle fiber  
   if (!(f_to)) { 
     if (state->curr_fiber->is_idle) {
       return 1;
     } else {
         f_to = state->idle_fiber;
-      }
+    }
   }
   // Utility function to perform enqueue and other yield housekeeping
   return _nk_fiber_yield_to(f_to);
@@ -1012,7 +1024,7 @@ int nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag)
         //FIBER_INFO("nk_fiber_yield() : yield aborted. Returning 0\n");
       } else { /* if no fiber to sched and not currenty in idle fiber, switch to idle fiber */
           new_to = state->idle_fiber;
-        }
+      }
     }
  
     // If the fiber could not be found, we yield to a random fiber instead

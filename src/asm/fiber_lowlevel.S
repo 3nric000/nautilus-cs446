@@ -111,11 +111,24 @@ ENTRY(_nk_fiber_fork_exit)
 ENTRY(new_nk_fiber_yield)
     FIBER_SAVE_GPRS()
     movq %rsp, %rdi
+    #if NAUT_CONFIG_FIBER_FSAVE  
+    movq 0xFFFFFFFFFFFFFFFF, %rax
+    movq 0xFFFFFFFFFFFFFFFF, %rdx
+    andq $-64, %rsp
+    movq %rsp, %rsi
+    XSAVE 0x0(%rsp)
+    #endif 
     callq __nk_fiber_yield 
 
 ENTRY(__nk_fiber_context_switch)
-    movq 0x0(%rdi), %rsp 
     // Restores registers from new stack
+    movq 0x16(%rdi), %rsp
+    #if NAUT_CONFIG_FIBER_FSAVE  
+    movq %rax, 0xFFFFFFFFFFFFFFFF
+    movq %rdx, 0xFFFFFFFFFFFFFFFF
+    XRSTOR 0x0(%rsp)
+    #endif 
+    movq 0x0(%rdi), %rsp 
     FIBER_RESTORE_GPRS()
     retq
 
@@ -128,6 +141,25 @@ ENTRY(_new_nk_fiber_join_yield)
     FIBER_SAVE_GPRS()
     movq %rsp, %rdi
     callq __new_nk_fiber_join_yield
+
+#if NAUT_CONFIG_FIBER_FSAVE
+ENTRY(_nk_fiber_fp_save)
+    pushq %rax
+    pushq %rdx
+    pushq %rsi
+    movq 0x0(%rdi), %rsi
+    andq $-1028, %rsi
+    movq %rsi, 0x16(%rdi)
+    xorq %rax, %rax
+    subq $1, %rax
+    xorq %rdx, %rdx
+    subq $1, %rdx
+	XSAVE (%rsi)
+    popq %rsi
+    popq %rdx
+    popq %rax
+	ret
+#endif
 
 /*
 ENTRY(_nk_fiber_context_switch)

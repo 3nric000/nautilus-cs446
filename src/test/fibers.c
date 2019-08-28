@@ -163,10 +163,11 @@ void fiber2(void *i, void **o)
 
 void print_even(void *i, void **o){
   nk_fiber_set_vc(vc);
+  int j = 0;
   for (int i = 0; i < 10; ++i){
     if ((i % 2) == 0){
-      nk_vc_printf("Fiber even, counter = %d\n", i);
-      new_nk_fiber_yield();
+      nk_vc_printf("Fiber even, counter = %d and j = %d\n", i, j);
+      j = new_nk_fiber_yield();
     }
   }
   nk_vc_printf("Fiber even is finished\n");

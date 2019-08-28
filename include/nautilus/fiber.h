@@ -218,6 +218,17 @@ void print_data();
     movq 112(%rsp), %rax; \
     addq $120, %rsp;
 
+#define FIBER_RESTORE_GPRS_EARLY() \
+    movq (%rsp), %r15; \
+    movq 8(%rsp), %r14; \
+    movq 16(%rsp), %r13; \
+    movq 24(%rsp), %r12; \
+    movq 64(%rsp), %rbp; \
+    movq 72(%rsp), %rdi; \
+    movq 104(%rsp), %rbx; \
+    movq 112(%rsp), %rax; \
+    addq $120, %rsp;
+
 #define FIBER_RESTORE_GPRS_NOT_RAX() \
     movq (%rsp), %r15; \
     movq 8(%rsp), %r14; \

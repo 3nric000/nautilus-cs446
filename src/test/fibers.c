@@ -572,9 +572,17 @@ int test_fiber_timing(){
   nk_fiber_t *first;
   nk_fiber_t *second;
   vc = get_cur_thread()->vc;
+  if (nk_fiber_create(first_timer, 0, 0, 0, &first)) {
+    nk_vc_printf("test_fiber_timing() : Failed to start fiber\n");
+    return -1;
+  }
+  if (nk_fiber_create(second_timer, 0, 0, 0, &second)) {
+    nk_vc_printf("test_fiber_timing() : Failed to start fiber\n");
+    return  -1;
+  }
   // NO ERROR CHECKING (SO TIMING RESULTS ARE NOT SKEWED) 
-  nk_fiber_start(first_timer, 0, 0, 0, F_RAND_CPU, &first);
-  nk_fiber_start(second_timer, 0, 0, 0, F_RAND_CPU, &second);
+  nk_fiber_run(first, F_CURR_CPU);
+  nk_fiber_run(second, F_CURR_CPU);
   return 0;
 }
 

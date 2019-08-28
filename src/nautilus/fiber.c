@@ -1067,7 +1067,7 @@ int nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag)
 int nk_fiber_conditional_yield(uint8_t (*cond_function)(void *param), void *state)
 {
   if (cond_function(state)){
-    new_nk_fiber_yield();
+    return new_nk_fiber_yield();
   }
   return 1;
 }
@@ -1092,7 +1092,7 @@ int nk_fiber_conditional_yield(uint8_t (*cond_function)(void *param), void *stat
 int nk_fiber_conditional_yield_to(nk_fiber_t *f_to, int earlyRetFlag, uint8_t (*cond_function)(void *param), void *state)
 {
   if (cond_function(state)){
-    new_nk_fiber_yield_to(f_to, earlyRetFlag);
+    return new_nk_fiber_yield_to(f_to, earlyRetFlag);
   }
   return 1;
 }
@@ -1289,6 +1289,7 @@ int nk_fiber_set_fork_cpu(int target_cpu)
 
 /******* New attempt at yield *******/
 extern void __nk_fiber_context_switch(nk_fiber_t* f_to);
+extern void __nk_fiber_context_switch_early(nk_fiber_t* f_to);
 extern int _new_nk_fiber_join_yield();
 
 // Helper function called by nk_fiber_yield and nk_fiber_yield_to
@@ -1382,7 +1383,7 @@ __attribute__((noreturn)) void __nk_fiber_yield(uint64_t rsp, uint64_t offset)
     if (curr_fiber->is_idle) {
       //Abort yield somehow? Subtract from RSP and retq?
       *(uint64_t*)(rsp+GPR_RAX_OFFSET) = 1; 
-      __nk_fiber_context_switch(curr_fiber);
+      __nk_fiber_context_switch_early(curr_fiber);
     } else {
         f_to = state->idle_fiber;
     }
@@ -1421,7 +1422,7 @@ __attribute__((noreturn)) void _new_nk_fiber_yield_to(nk_fiber_t *f_to, int earl
     if (!(new_to)) { 
       if (curr_fiber->is_idle) { /* if no fiber to sched and curr idle, no reason to switch */
         *(uint64_t*)(rsp+GPR_RAX_OFFSET) = 0;
-        __nk_fiber_context_switch(curr_fiber);
+        __nk_fiber_context_switch_early(curr_fiber);
         //FIBER_INFO("nk_fiber_yield() : yield aborted. Returning 0\n");
       } else { /* if no fiber to sched and not currenty in idle fiber, switch to idle fiber */
           new_to = state->idle_fiber;
@@ -1457,7 +1458,7 @@ __attribute__((noreturn)) void __new_nk_fiber_join_yield(uint64_t rsp)
       // Should never come from the idle fiber
       panic("Attempted to call yield_to from idle fiber. Should never happen!\n");
       *(uint64_t*)(rsp+GPR_RAX_OFFSET) = -1;
-      __nk_fiber_context_switch(f_from);
+      __nk_fiber_context_switch_early(f_from);
     } else {
         f_to = state->idle_fiber;
     }

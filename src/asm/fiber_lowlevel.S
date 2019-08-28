@@ -122,14 +122,26 @@ ENTRY(new_nk_fiber_yield)
 
 ENTRY(__nk_fiber_context_switch)
     // Restores registers from new stack
-    movq 0x16(%rdi), %rsp
     #if NAUT_CONFIG_FIBER_FSAVE  
+    movq 0x16(%rdi), %rsp
     movq %rax, 0xFFFFFFFFFFFFFFFF
     movq %rdx, 0xFFFFFFFFFFFFFFFF
     XRSTOR 0x0(%rsp)
     #endif 
     movq 0x0(%rdi), %rsp 
     FIBER_RESTORE_GPRS()
+    retq
+
+ENTRY(__nk_fiber_context_switch_early)
+    // Restores registers from new stack
+    #if NAUT_CONFIG_FIBER_FSAVE  
+    movq 0x16(%rdi), %rsp
+    movq %rax, 0xFFFFFFFFFFFFFFFF
+    movq %rdx, 0xFFFFFFFFFFFFFFFF
+    XRSTOR 0x0(%rsp)
+    #endif 
+    movq 0x0(%rdi), %rsp 
+    FIBER_RESTORE_GPRS_EARLY()
     retq
 
 ENTRY(new_nk_fiber_yield_to)

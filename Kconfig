@@ -728,8 +728,45 @@ menu "Garbage Collection Options"
    help
       Adddes test suite for BDWGC, which can be run from the shell
 
- endmenu
+  endmenu
 
+    menu "FPU Options"
+
+    config XSAVE
+      bool "Allow saving of FPRs with XSAVE instructions"
+      default true
+      help
+        Adds xsave instruction support to Nautilus. Processor
+        must have xsave support or this feature will be ignored.
+
+    config SSE_SUPPORT
+          bool "Enable saving of SSE registers with XSAVE"
+          default true
+          depends on XSAVE
+          help
+            Will save SSE state with XSAVE when enabled. Required
+            in order to save AVX and AVX512f state. This will
+            be ignored if processor does not have SSE registers.
+
+    config AVX_SUPPORT
+              bool "Enable saving of AVX registers with XSAVE"
+              default true
+              depends on XSAVE
+              help
+                Will save AVX state with XSAVE when enabled. Required
+                in order to save AVX512f state. This opt. will
+                be ignored if processor does not have AVX registers.
+
+    config AVX512F_SUPPORT
+                  bool "Enable saving of AVX512f registers with XSAVE"
+                  default true
+                  depends on XSAVE
+                  help
+                    Will save AVX512f state with XSAVE when enabled. This
+                    opt will be ignored if processor does not 
+                    have avx512f registers.
+
+  endmenu 
 endmenu
 
 menu "Optimizations"

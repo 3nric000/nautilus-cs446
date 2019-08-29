@@ -677,7 +677,26 @@ static void __fiber_thread(void *in, void **out)
 
   // Updating current cpu info
   idle_fiber_ptr->curr_cpu = my_cpu_id();
-  
+
+/* TODO MAC: Remove when you're done testing FPU stuff 
+  uint64_t eax;
+  uint64_t edx;
+
+  asm volatile ("pushq %%rcx ;"
+                "pushq %%rdx ;"
+                "pushq %%rax ;"
+                "xor %%rcx, %%rcx ;"
+                "xgetbv ;"
+                "movl %%eax, %[result1] ;"
+                "movl %%edx, %[result2] ;"
+                "popq %%rax ;"
+                "popq %%rdx ;"
+                "popq %%rcx ;"
+                 : [result1]"=m" (eax), [result2] "=m" (edx) : : "memory");
+      
+  FIBER_INFO("The cr0 features are eax: %d and edx: %d\n", eax, edx);
+*/
+
   // Starting the idle fiber with fiber wrapper (so it isn't added to the queue)
   _fiber_wrapper(idle_fiber_ptr);
 

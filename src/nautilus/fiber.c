@@ -1112,7 +1112,7 @@ int nk_fiber_conditional_yield_to(nk_fiber_t *f_to, int earlyRetFlag, uint8_t (*
  * On failure, parent gets (nk_fiber_t*)-EINVAL;
  *
  */
-__attribute__((noreturn)) void __nk_fiber_fork(uint64_t rsp0, uint64_t offset)
+nk_fiber_t *__nk_fiber_fork(uint64_t rsp0, uint64_t offset)
 {
   // Fetch current fiber and fiber state
   fiber_state *state = _GET_FIBER_STATE();
@@ -1125,6 +1125,7 @@ __attribute__((noreturn)) void __nk_fiber_fork(uint64_t rsp0, uint64_t offset)
   uint64_t     rbp_offset_from_ret0_addr;
   void         *child_stack;
   uint64_t     rsp;
+  uint64_t     fp_state_offset;
 
   // Store the value of %rsp into var rsp and clobber memory
   __asm__ __volatile__ ( "movq %%rsp, %0" : "=r"(rsp) : : "memory");
@@ -1141,15 +1142,17 @@ __attribute__((noreturn)) void __nk_fiber_fork(uint64_t rsp0, uint64_t offset)
   }
 
   curr->rsp = rsp0;
-  
+
+  fp_state_offset = 0;  
   #if NAUT_CONFIG_FIBER_FSAVE
   curr->fpu_state_offset = offset;
+  fp_state_offset = rsp0 - offset;
   #endif
 
   // this is the address at which the fork wrapper (nk_fiber_fork) stashed
   // the current value of rbp - this must conform to the GPR SAVE model
   // in fiber.h
-  void *rbp_stash_addr = ret0_addr + 9*8; 
+  void *rbp_stash_addr = ret0_addr + 9*8 + FIBER_FPR_SAVE_SIZE + fp_state_offset; 
   
   // from last byte of tos_rbp to the last byte of the stack on return from this function 
   // (return address of wrapper)
@@ -1170,8 +1173,7 @@ __attribute__((noreturn)) void __nk_fiber_fork(uint64_t rsp0, uint64_t offset)
   nk_fiber_create(NULL, NULL, 0, alloc_size, &new);
   if (!new) {
     //panic("__nk_fiber_fork() : could not allocate new fiber. Fork failed.\n");
-    *(uint64_t*)(rsp0+GPR_RAX_OFFSET) = (nk_fiber_t*)-EINVAL;
-    _nk_fiber_fork_exit(curr); 
+    return (nk_fiber_t*)-EINVAL;
   }
   child_stack = new->stack;
    
@@ -1196,7 +1198,7 @@ __attribute__((noreturn)) void __nk_fiber_fork(uint64_t rsp0, uint64_t offset)
     rbp_stash_ptr = (void**)(new->rsp + rbp_stash_offset_from_ret0_addr - 0x08);
   
     FIBER_DEBUG("__nk_fiber_fork() : rsp: %p, at rsp: %p, rbp_stash_offset_from_ret0_addr: %p\n", new->rsp, *(void**)new->rsp, rbp_stash_offset_from_ret0_addr);
-    FIBER_DEBUG("__nk_fiber_fork() : rsp + 0x78: %p, rbp_stash_offset_from_ret0_addr: %p\n", *(void**)(new->rsp + 0x78), *(void**)(new->rsp+rbp_stash_offset_from_ret0_addr -0x8));
+    FIBER_DEBUG("__nk_fiber_fork() : rsp + 0x78: %p, rbp_stash_offset_from_ret0_addr: %p\n", *(void**)(new->rsp + 0x78), *(void**)(new->rsp+rbp_stash_offset_from_ret0_addr - 0x8));
   
     *rbp_stash_ptr = (void*)(new->rsp + rbp_offset_from_ret0_addr);
   
@@ -1211,11 +1213,16 @@ __attribute__((noreturn)) void __nk_fiber_fork(uint64_t rsp0, uint64_t offset)
       *rbp_stash_ptr = (void*)(new->rsp + rbp_offset_from_ret0_addr);
       rbp2_ptr = (void**)(new->rsp + rbp1_offset_from_ret0_addr);
       ret2_ptr = rbp2_ptr + 1;
-  }
- 
+  } 
   FIBER_DEBUG("__nk_fiber_fork() : rbp1_offset_from_ret0_addr: %p, rbp2_ptr: %p, ret2_ptr: %p\n", rbp1_offset_from_ret0_addr, rbp2_ptr, ret2_ptr);
   FIBER_DEBUG("__nk_fiber_fork() : rbp2_ptr - 0x8: %p, rbp2_ptr: %p, ret2_ptr: %p\n", *(void**)(rbp2_ptr - 0x8), *rbp2_ptr, *ret2_ptr);
   
+  #if NAUT_CONFIG_FIBER_FSAVE
+  new->fpu_state_offset = (new->rsp - fp_state_offset);
+  #endif
+
+  FIBER_DEBUG("__nk_fiber_fork() : fp_state_offset %p and new->fpu_state_offset %p\n", fp_state_offset, new->fpu_state_offset);
+
   // rbp2 we don't care about since we will not not
   // return from the caller in the child, but rather go into the fiber cleanup
   *rbp2_ptr = 0x0ULL;
@@ -1240,14 +1247,10 @@ __attribute__((noreturn)) void __nk_fiber_fork(uint64_t rsp0, uint64_t offset)
   if (nk_fiber_run(new, state->fork_cpu) < 0) {
     free(new->stack);
     free(new);
-    *(uint64_t*)(rsp0+GPR_RAX_OFFSET) = (nk_fiber_t*)-EINVAL;
-    _nk_fiber_fork_exit(curr); 
+    return (nk_fiber_t*)-EINVAL;
   } 
 
-  *(uint64_t*)(rsp0+GPR_RAX_OFFSET) = new;
-  _nk_fiber_fork_exit(curr);
-
-  __builtin_unreachable();
+  return new;
 }
 
 /* 

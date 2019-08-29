@@ -125,7 +125,10 @@ ENTRY(nk_fiber_fork)
 // for %rax. This is because the address of the new fiber will be placed
 // into %rax (and returned to the caller of fork)
 ENTRY(_nk_fiber_fork_exit)
-    movq 0x0(%rdi), %rsp
+    movq %rax, %r15
+    callq nk_fiber_current
+    movq 0x0(%rax), %rsp
+    movq %r15, %rax
     FIBER_RESTORE_GPRS_NOT_RAX()
     //FIBER_RESTORE_GPRS()
     retq
@@ -255,7 +258,7 @@ ENTRY(_nk_fiber_fp_save)
     //pushq %rdx
     //pushq %rsi
     movq 0x0(%rdi), %rsi
-    andq $-1028, %rsi
+    andq $-1024, %rsi
     movq %rsi, 0x16(%rdi)
     movq $-1, %rax
     movq $-1, %rdx

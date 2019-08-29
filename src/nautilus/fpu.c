@@ -62,9 +62,19 @@
      f.val = ret.r; \
      f.feat; \
      })
+
+#define _INTEL_FPU_EXT_FEAT_QUERY(r, feat)  \
+    ({ \
+     cpuid_ret_t ret; \
+     struct cpuid_ext_feat_flags_e ## r ## x f; \
+     cpuid_sub(CPUID_EXT_FEATURE_INFO, CPUID_EXT_FEATURE_SUB_INFO, &ret); \
+     f.val = ret.r; \
+     f.feat; \
+     })
      
 #define FPU_ECX_FEAT_QUERY(feat) _INTEL_FPU_FEAT_QUERY(c, feat)
 #define FPU_EDX_FEAT_QUERY(feat) _INTEL_FPU_FEAT_QUERY(d, feat)
+#define FPU_EBX_EXT_FEAT_QUERY(feat) _INTEL_FPU_EXT_FEAT_QUERY(b, feat)
 
 #define AMD_FPU_ECX_FEAT_QUERY(feat) _AMD_FPU_FEAT_QUERY(c, feat)
 #define AMD_FPU_EDX_FEAT_QUERY(feat) _AMD_FPU_FEAT_QUERY(d, feat)
@@ -268,22 +278,6 @@ enable_sse (void)
     asm volatile ("ldmxcsr %[_m]" :: [_m] "m" (m) : "memory");
 }
 
-static void
-enable_xsave (void)
-{
-    ulong_t r = read_cr4();
-
-    r |= CR4_OSXSAVE;    // OS supports xsave/xrstor of FPU regs
-
-    write_cr4(r);
-
-    // read cpuid (eax = D and ecx = 0), returns edx:eax which indicates
-    // bit vector of supported savable state (registers)
-    // Use xsetbv instruction to select which state you want to save
-}
-
-
-
 static uint8_t
 has_fma4 (void)
 {
@@ -315,23 +309,23 @@ has_avx (void)
     return FPU_ECX_FEAT_QUERY(avx);
 }
 
-/*
+
+
 // TODO: FIX THIS LATER
+
 static uint8_t
 has_avx2 (void)
 {
-    return FPU_ECX_FEAT_QUERY(avx2);
+    return FPU_EBX_EXT_FEAT_QUERY(avx2);
 }
 
 
 // TODO: FIX THIS LATER
 static uint8_t
-has_avx512 (void)
+has_avx512f (void)
 {
-    return FPU_ECX_FEAT_QUERY(avx);
+    return FPU_EBX_EXT_FEAT_QUERY(avx512f);
 }
-*/
-
 
 static uint8_t
 has_fxsr (void)
@@ -354,6 +348,14 @@ get_xsave_features (void)
     return r.a;
 }
 
+static uint32_t 
+get_xsave_features2 (void)
+{
+    cpuid_ret_t r;
+    cpuid(0, &r);
+    return r.d;
+}
+
 static void
 set_osxsave (void)
 {
@@ -361,6 +363,45 @@ set_osxsave (void)
     r |= CR4_OSXSAVE;
     write_cr4(r);
 }
+
+static void
+enable_xsave (void)
+{
+    set_osxsave();
+
+    //TODO MAC: Make this happen correctly
+    // read cpuid (eax = D and ecx = 0), returns edx:eax which indicates
+    // bit vector of supported savable state (registers)
+    // Use xsetbv instruction to select which state you want to save
+    /*asm volatile ("pushq %%rax ;"
+                "pushq %%rcx ;"
+                "movq 0xd, %%rax ;"
+                "xor %%rcx, %%rcx ;"
+                "cpuid ;"
+                "xsetbv ;"
+                "popq %%rcx ;"
+                "popq %%rax ;"
+                 : : : "memory");
+    */
+}
+
+static void
+enable_avx (void)
+{
+    asm volatile ("pushq %%rax;"
+            "pushq %%rcx;"
+            "xor %%rcx, %%rcx;"
+            "xgetbv;"
+            "or %%eax, 7;"
+            "xsetbv ;"
+            "popq %%rcx;"
+            "popq %%rax;"
+            :
+            :
+            : "memory");
+}
+
+
 
 static void 
 amd_fpu_init (struct naut_info * naut)
@@ -391,6 +432,9 @@ fpu_init_common (struct naut_info * naut)
     uint8_t x87_ready = 0;
     uint8_t sse_ready = 0;
     uint8_t xsave_ready = 0;
+    uint8_t avx_ready = 0;
+    uint8_t avx2_ready = 0;
+    uint8_t avx512_ready = 0;
 
     if (has_x87()) {
         FPU_DEBUG("\t[x87]\n");
@@ -421,15 +465,26 @@ fpu_init_common (struct naut_info * naut)
         ++xsave_ready;
         FPU_DEBUG("\t[XSAVE/RESTORE]\n");
     }
- 
+
+    if (has_avx()) {
+        ++avx_ready;
+        FPU_DEBUG("\t[AVX]\n");
+    }
+
+    if (has_avx2()) {
+        ++avx2_ready;
+        FPU_DEBUG("\t[AVX2]\n");
+    }
+
+    if (has_avx512f()) {
+        ++avx512_ready;
+        FPU_DEBUG("\t[AVX512]\n");
+    }
+
     DEFAULT_FUN_CHECK(has_sse4d1, SSE4.1)
     DEFAULT_FUN_CHECK(has_sse4d2, SSE4.2)
     DEFAULT_FUN_CHECK(has_mmx, MMX)
-    DEFAULT_FUN_CHECK(has_avx, AVX)
-/*
-    DEFAULT_FUN_CHECK(has_avx2, AVX2)
-    DEFAULT_FUN_CHECK(has_avx512, AVX512)
-*/
+
     /* should we turn on x87? */
     if (x87_ready) {
         FPU_DEBUG("\tInitializing legacy x87 FPU\n");
@@ -442,28 +497,28 @@ fpu_init_common (struct naut_info * naut)
         enable_sse();
     }
 
+    /* does processor have xsave instructions? */
     if (xsave_ready) {
         FPU_DEBUG("\tInitializing XSAVE instructions\n");
         enable_xsave();
     }
-/*
-    // has AVX 
-    if (AVX) {
-        FPU_DEBUG("\tInitializing AVX features\n");
+
+    /* Does processor have AVX registers? */
+    if (avx_ready) {
+        FPU_DEBUG("\tInitializing AVX support\n");
         enable_avx();
     }
 
-    // has AVX2 
-    if (AVX2) {
-        FPU_DEBUG("\tInitializing AVX features\n");
-        enable_avx2();
+    /* Does processor have AVX2 registers? */
+    if (avx2_ready) {
+        FPU_DEBUG("\tInitializing AVX2 support\n");
+        //enable_avx2();
     }
     // has AVX 
-    if (AVX) {
-        FPU_DEBUG("\tInitializing AVX features\n");
-        enable_avx();
+    if (avx512_ready) {
+        FPU_DEBUG("\tInitializing AVX512 support\n");
+        //enable_avx512();
     }
-*/
 
 }
 

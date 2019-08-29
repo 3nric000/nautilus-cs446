@@ -46,11 +46,18 @@ typedef struct nk_thread nk_thread_t;
 #define F_CURR_CPU -1
 #define YIELD_TO_EARLY_RET 1
 
-/* common thread stack sizes */
+/* common fiber stack sizes */
 #define FSTACK_DEFAULT 0 // will be 4K
 #define FSTACK_4KB 0x001000
 #define FSTACK_1MB 0x100000
 #define FSTACK_2MB 0x200000
+
+/* Register save size */
+#if NAUT_CONFIG_FIBER_FSAVE
+#define FIBER_FPR_SAVE_SIZE 0x1000
+#else
+#define FIBER_FPR_SAVE_SIZE 0x0
+#endif
 
 /********** EXTERNAL INTERFACE **********/
 

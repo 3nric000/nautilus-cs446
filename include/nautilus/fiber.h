@@ -183,22 +183,22 @@ void print_data();
 
 
 #define FIBER_SAVE_GPRS() \
-    movq %rax, -8(%rsp); \
-    movq %rbx, -16(%rsp); \
-    movq %rcx, -24(%rsp); \
-    movq %rdx, -32(%rsp); \
-    movq %rsi, -40(%rsp); \
-    movq %rdi, -48(%rsp); \
-    movq %rbp, -56(%rsp); \
-    movq %r8,  -64(%rsp); \
-    movq %r9,  -72(%rsp); \
-    movq %r10, -80(%rsp); \
-    movq %r11, -88(%rsp); \
-    movq %r12, -96(%rsp); \
-    movq %r13, -104(%rsp); \
-    movq %r14, -112(%rsp); \
-    movq %r15, -120(%rsp); \
-    subq $120, %rsp; 
+    subq $120, %rsp;    \
+    movq %rax, 112(%rsp); \
+    movq %rbx, 104(%rsp); \
+    movq %rcx, 96(%rsp); \
+    movq %rdx, 88(%rsp); \
+    movq %rsi, 80(%rsp); \
+    movq %rdi, 72(%rsp); \
+    movq %rbp, 64(%rsp); \
+    movq %r8,  56(%rsp); \
+    movq %r9,  48(%rsp); \
+    movq %r10, 40(%rsp); \
+    movq %r11, 32(%rsp); \
+    movq %r12, 24(%rsp); \
+    movq %r13, 16(%rsp); \
+    movq %r14, 8(%rsp); \
+    movq %r15, 0(%rsp); \
 
 #define FIBER_RESTORE_GPRS() \
     movq (%rsp), %r15; \
@@ -218,6 +218,7 @@ void print_data();
     movq 112(%rsp), %rax; \
     addq $120, %rsp;
 
+/* Only restores callee saved registers since yield did not occur*/
 #define FIBER_RESTORE_GPRS_EARLY() \
     movq (%rsp), %r15; \
     movq 8(%rsp), %r14; \
@@ -225,6 +226,7 @@ void print_data();
     movq 24(%rsp), %r12; \
     movq 64(%rsp), %rbp; \
     movq 72(%rsp), %rdi; \
+    movq 80(%rsp), %rsi; \
     movq 104(%rsp), %rbx; \
     movq 112(%rsp), %rax; \
     addq $120, %rsp;
@@ -244,7 +246,7 @@ void print_data();
     movq 88(%rsp), %rdx; \
     movq 96(%rsp), %rcx; \
     movq 104(%rsp), %rbx; \
-    addq $120, %rsp; 
+    addq $120, %rsp;
 
 /******* Experimental way to context switch *******/
 

@@ -41,6 +41,7 @@
 #include <nautilus/mm.h>
 #include <nautilus/random.h>
 #include <nautilus/scheduler.h>
+#include <nautilus/cpu_state.h>
 
 #ifndef NAUT_CONFIG_DEBUG_FIBERS
 #undef  DEBUG_PRINT
@@ -85,7 +86,7 @@ typedef struct nk_fiber_percpu_state {
 extern void _nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
 extern void _nk_exit_switch(nk_fiber_t *next);
 extern nk_fiber_t *nk_fiber_fork();
-extern void _nk_fiber_fork_exit();
+extern int _nk_fiber_fork_exit(nk_fiber_t *curr);
 #if NAUT_CONFIG_FIBER_FSAVE
 extern void _nk_fiber_fp_save(nk_fiber_t* f);
 #endif
@@ -797,7 +798,7 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   nk_fiber_t *fiber = NULL;
 
   // Get stack size
-  nk_stack_size_t required_stack_size = stack_size ? stack_size: FSTACK_4KB;
+  nk_stack_size_t required_stack_size = stack_size ? stack_size: FSTACK_1MB;
 
   // Allocate space for a fiber
   fiber = malloc(sizeof(nk_fiber_t));
@@ -1111,7 +1112,7 @@ int nk_fiber_conditional_yield_to(nk_fiber_t *f_to, int earlyRetFlag, uint8_t (*
  * On failure, parent gets (nk_fiber_t*)-EINVAL;
  *
  */
-nk_fiber_t *__nk_fiber_fork()
+__attribute__((noreturn)) void __nk_fiber_fork(uint64_t rsp0, uint64_t offset)
 {
   // Fetch current fiber and fiber state
   fiber_state *state = _GET_FIBER_STATE();
@@ -1127,7 +1128,7 @@ nk_fiber_t *__nk_fiber_fork()
 
   // Store the value of %rsp into var rsp and clobber memory
   __asm__ __volatile__ ( "movq %%rsp, %0" : "=r"(rsp) : : "memory");
- 
+
   void *rbp0      = __builtin_frame_address(0);                   // current rbp, *rbp0 = rbp1
   void *rbp1      = __builtin_frame_address(1);                   // caller rbp, *rbp1 = rbp2  (forker's frame)
   void *rbp_tos   = __builtin_frame_address(STACK_CLONE_DEPTH);   // should scan backward to avoid having this be zero or crazy
@@ -1137,8 +1138,13 @@ nk_fiber_t *__nk_fiber_fork()
 	(uint64_t)rbp_tos >= (uint64_t)(curr->stack + curr->stack_size)) { 
 	FIBER_DEBUG("__nk_fiber_fork() : Cannot resolve %lu stack frames on fork, using just one\n", STACK_CLONE_DEPTH);
         rbp_tos = rbp1;
-    }
+  }
 
+  curr->rsp = rsp0;
+  
+  #if NAUT_CONFIG_FIBER_FSAVE
+  curr->fpu_state_offset = offset;
+  #endif
 
   // this is the address at which the fork wrapper (nk_fiber_fork) stashed
   // the current value of rbp - this must conform to the GPR SAVE model
@@ -1164,7 +1170,8 @@ nk_fiber_t *__nk_fiber_fork()
   nk_fiber_create(NULL, NULL, 0, alloc_size, &new);
   if (!new) {
     //panic("__nk_fiber_fork() : could not allocate new fiber. Fork failed.\n");
-    return (nk_fiber_t*)-EINVAL;
+    *(uint64_t*)(rsp0+GPR_RAX_OFFSET) = (nk_fiber_t*)-EINVAL;
+    _nk_fiber_fork_exit(curr); 
   }
   child_stack = new->stack;
    
@@ -1233,10 +1240,14 @@ nk_fiber_t *__nk_fiber_fork()
   if (nk_fiber_run(new, state->fork_cpu) < 0) {
     free(new->stack);
     free(new);
-    return (nk_fiber_t*)-EINVAL;
+    *(uint64_t*)(rsp0+GPR_RAX_OFFSET) = (nk_fiber_t*)-EINVAL;
+    _nk_fiber_fork_exit(curr); 
   } 
-  
-  return new;
+
+  *(uint64_t*)(rsp0+GPR_RAX_OFFSET) = new;
+  _nk_fiber_fork_exit(curr);
+
+  __builtin_unreachable();
 }
 
 /* 
@@ -1354,7 +1365,7 @@ __attribute__((noreturn)) void __nk_fiber_yield(uint64_t rsp, uint64_t offset)
   // Saves current stack pointer into fiber struct
   nk_fiber_t *curr_fiber = state->curr_fiber;
   curr_fiber->rsp = rsp;
- 
+
   #if NAUT_CONFIG_FIBER_FSAVE
   curr_fiber->fpu_state_offset = offset;
   #endif
@@ -1383,7 +1394,8 @@ __attribute__((noreturn)) void __nk_fiber_yield(uint64_t rsp, uint64_t offset)
     if (curr_fiber->is_idle) {
       //Abort yield somehow? Subtract from RSP and retq?
       *(uint64_t*)(rsp+GPR_RAX_OFFSET) = 1; 
-      __nk_fiber_context_switch_early(curr_fiber);
+      //__nk_fiber_context_switch_early(curr_fiber);
+      __nk_fiber_context_switch(curr_fiber);
     } else {
         f_to = state->idle_fiber;
     }
@@ -1393,12 +1405,19 @@ __attribute__((noreturn)) void __nk_fiber_yield(uint64_t rsp, uint64_t offset)
   __nk_fiber_yield_to(f_to, state, curr_fiber);
 }
 
-__attribute__((noreturn)) void _new_nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag, uint64_t rsp)
+// rsp and offset are flipped becuase of issues caused by FPR saving
+__attribute__((noreturn)) void _new_nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag, uint64_t offset, uint64_t rsp)
 {
-  // Locks fiber state
+  // Updates f_to's stack info
   fiber_state *state = _GET_FIBER_STATE();
   nk_fiber_t *curr_fiber = state->curr_fiber;
   curr_fiber->rsp = rsp;
+  
+  #if NAUT_CONFIG_FIBER_FSAVE
+  curr_fiber->fpu_state_offset = offset;
+  #endif
+
+  // Locks fiber state
   _LOCK_SCHED_QUEUE(state);
   // Remove f_to from its respective fiber queue (need to check all CPUs)
   // This is currently not safe, fiber may be running and therefore not in sched queue
@@ -1422,6 +1441,7 @@ __attribute__((noreturn)) void _new_nk_fiber_yield_to(nk_fiber_t *f_to, int earl
     if (!(new_to)) { 
       if (curr_fiber->is_idle) { /* if no fiber to sched and curr idle, no reason to switch */
         *(uint64_t*)(rsp+GPR_RAX_OFFSET) = 0;
+        //__nk_fiber_context_switch_early(curr_fiber);
         __nk_fiber_context_switch_early(curr_fiber);
         //FIBER_INFO("nk_fiber_yield() : yield aborted. Returning 0\n");
       } else { /* if no fiber to sched and not currenty in idle fiber, switch to idle fiber */
@@ -1440,7 +1460,7 @@ __attribute__((noreturn)) void _new_nk_fiber_yield_to(nk_fiber_t *f_to, int earl
   __nk_fiber_yield_to(f_to, state, curr_fiber);
 }
 
-__attribute__((noreturn)) void __new_nk_fiber_join_yield(uint64_t rsp)
+__attribute__((noreturn)) void __new_nk_fiber_join_yield(uint64_t rsp, uint64_t offset)
 {
   // Gets current state that will be needed throughout function
   fiber_state *state = _GET_FIBER_STATE();
@@ -1458,7 +1478,8 @@ __attribute__((noreturn)) void __new_nk_fiber_join_yield(uint64_t rsp)
       // Should never come from the idle fiber
       panic("Attempted to call yield_to from idle fiber. Should never happen!\n");
       *(uint64_t*)(rsp+GPR_RAX_OFFSET) = -1;
-      __nk_fiber_context_switch_early(f_from);
+      //__nk_fiber_context_switch_early(f_from);
+      __nk_fiber_context_switch(f_from);
     } else {
         f_to = state->idle_fiber;
     }

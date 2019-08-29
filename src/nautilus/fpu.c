@@ -268,6 +268,21 @@ enable_sse (void)
     asm volatile ("ldmxcsr %[_m]" :: [_m] "m" (m) : "memory");
 }
 
+static void
+enable_xsave (void)
+{
+    ulong_t r = read_cr4();
+
+    r |= CR4_OSXSAVE;    // OS supports xsave/xrstor of FPU regs
+
+    write_cr4(r);
+
+    // read cpuid (eax = D and ecx = 0), returns edx:eax which indicates
+    // bit vector of supported savable state (registers)
+    // Use xsetbv instruction to select which state you want to save
+}
+
+
 
 static uint8_t
 has_fma4 (void)
@@ -299,6 +314,23 @@ has_avx (void)
 {
     return FPU_ECX_FEAT_QUERY(avx);
 }
+
+/*
+// TODO: FIX THIS LATER
+static uint8_t
+has_avx2 (void)
+{
+    return FPU_ECX_FEAT_QUERY(avx2);
+}
+
+
+// TODO: FIX THIS LATER
+static uint8_t
+has_avx512 (void)
+{
+    return FPU_ECX_FEAT_QUERY(avx);
+}
+*/
 
 
 static uint8_t
@@ -358,6 +390,7 @@ fpu_init_common (struct naut_info * naut)
 {
     uint8_t x87_ready = 0;
     uint8_t sse_ready = 0;
+    uint8_t xsave_ready = 0;
 
     if (has_x87()) {
         FPU_DEBUG("\t[x87]\n");
@@ -384,12 +417,19 @@ fpu_init_common (struct naut_info * naut)
         panic("No FXSAVE/RESTORE support. Thread switching will be broken\n");
     }
 
-    DEFAULT_FUN_CHECK(has_xsave, XSAVE/RESTORE)
+    if (has_xsave()) {
+        ++xsave_ready;
+        FPU_DEBUG("\t[XSAVE/RESTORE]\n");
+    }
+ 
     DEFAULT_FUN_CHECK(has_sse4d1, SSE4.1)
     DEFAULT_FUN_CHECK(has_sse4d2, SSE4.2)
     DEFAULT_FUN_CHECK(has_mmx, MMX)
     DEFAULT_FUN_CHECK(has_avx, AVX)
-
+/*
+    DEFAULT_FUN_CHECK(has_avx2, AVX2)
+    DEFAULT_FUN_CHECK(has_avx512, AVX512)
+*/
     /* should we turn on x87? */
     if (x87_ready) {
         FPU_DEBUG("\tInitializing legacy x87 FPU\n");
@@ -401,6 +441,30 @@ fpu_init_common (struct naut_info * naut)
         FPU_DEBUG("\tInitializing SSE extensions\n");
         enable_sse();
     }
+
+    if (xsave_ready) {
+        FPU_DEBUG("\tInitializing XSAVE instructions\n");
+        enable_xsave();
+    }
+/*
+    // has AVX 
+    if (AVX) {
+        FPU_DEBUG("\tInitializing AVX features\n");
+        enable_avx();
+    }
+
+    // has AVX2 
+    if (AVX2) {
+        FPU_DEBUG("\tInitializing AVX features\n");
+        enable_avx2();
+    }
+    // has AVX 
+    if (AVX) {
+        FPU_DEBUG("\tInitializing AVX features\n");
+        enable_avx();
+    }
+*/
+
 }
 
 /* 

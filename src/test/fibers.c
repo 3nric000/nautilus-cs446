@@ -572,6 +572,7 @@ int test_fiber_timing(){
   nk_fiber_t *first;
   nk_fiber_t *second;
   vc = get_cur_thread()->vc;
+  nk_vc_printf("test_fiber_timing() : virtual console %p\n", vc);
   if (nk_fiber_create(first_timer, 0, 0, 0, &first)) {
     nk_vc_printf("test_fiber_timing() : Failed to start fiber\n");
     return -1;

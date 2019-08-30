@@ -232,6 +232,8 @@ static void _nk_fiber_exit(nk_fiber_t *f)
 // Wrapper used to execute a fiber's routine
 static void _fiber_wrapper(nk_fiber_t* f_to)
 {
+  FIBER_DEBUG("_nk_fiber_wrapper() : executing fiber routine from fiber %p\n", f_to);
+
   // Execute fiber function
   f_to->fun(f_to->input, f_to->output);
 
@@ -306,6 +308,7 @@ static void _nk_fiber_init(nk_fiber_t *f)
   _fiber_push(f, 0xdeadbeef1234567dul);
   #if NAUT_CONFIG_FIBER_FSAVE
   _nk_fiber_fp_save(f);
+  FIBER_INFO("FP state init done \n");
   #endif
 
   return;
@@ -334,6 +337,7 @@ static void _nk_fiber_init(nk_fiber_t *f)
   _fiber_push(f, 0x0ul);
   #if NAUT_CONFIG_FIBER_FSAVE
   _nk_fiber_fp_save(f);
+  FIBER_INFO("FP state init done \n");
   #endif
   return;
 }
@@ -817,7 +821,7 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   nk_fiber_t *fiber = NULL;
 
   // Get stack size
-  nk_stack_size_t required_stack_size = stack_size ? stack_size: FSTACK_1MB;
+  nk_stack_size_t required_stack_size = stack_size ? stack_size: FSTACK_16KB;
 
   // Allocate space for a fiber
   fiber = malloc(sizeof(nk_fiber_t));
@@ -1171,7 +1175,7 @@ nk_fiber_t *__nk_fiber_fork(uint64_t rsp0, uint64_t offset)
   // this is the address at which the fork wrapper (nk_fiber_fork) stashed
   // the current value of rbp - this must conform to the GPR SAVE model
   // in fiber.h
-  void *rbp_stash_addr = ret0_addr + 9*8 + FIBER_FPR_SAVE_SIZE + fp_state_offset; 
+  void *rbp_stash_addr = ret0_addr + 9*8 /*+ FIBER_FPR_SAVE_SIZE*/ + fp_state_offset; 
   
   // from last byte of tos_rbp to the last byte of the stack on return from this function 
   // (return address of wrapper)
@@ -1195,7 +1199,13 @@ nk_fiber_t *__nk_fiber_fork(uint64_t rsp0, uint64_t offset)
     return (nk_fiber_t*)-EINVAL;
   }
   child_stack = new->stack;
-   
+
+  //TODO MAC: Figure out how to do this correctly
+  #if NAUT_CONFIG_FIBER_FSAVE
+  uint64_t new_start_of_stack = new->fpu_state_offset - fp_state_offset;
+  child_stack = new->stack + new_start_of_stack;
+  #endif
+
   // current fiber's stack is copied to new fiber
   _fiber_push(new, (uint64_t)&_nk_fiber_cleanup);  
 
@@ -1463,7 +1473,6 @@ __attribute__((noreturn)) void _new_nk_fiber_yield_to(nk_fiber_t *f_to, int earl
     if (!(new_to)) { 
       if (curr_fiber->is_idle) { /* if no fiber to sched and curr idle, no reason to switch */
         *(uint64_t*)(rsp+GPR_RAX_OFFSET) = 0;
-        //__nk_fiber_context_switch_early(curr_fiber);
         __nk_fiber_context_switch_early(curr_fiber);
         //FIBER_INFO("nk_fiber_yield() : yield aborted. Returning 0\n");
       } else { /* if no fiber to sched and not currenty in idle fiber, switch to idle fiber */

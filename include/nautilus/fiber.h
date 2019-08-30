@@ -49,6 +49,7 @@ typedef struct nk_thread nk_thread_t;
 /* common fiber stack sizes */
 #define FSTACK_DEFAULT 0 // will be 4K
 #define FSTACK_4KB 0x001000
+#define FSTACK_16KB 0x004000
 #define FSTACK_1MB 0x100000
 #define FSTACK_2MB 0x200000
 
@@ -76,7 +77,7 @@ typedef enum {  INIT,               // Being initialized
 typedef struct nk_fiber {
   uint64_t rsp;                /* +0  SHOULD NOT CHANGE POSITION */
   void *stack;                 /* +8  SHOULD NOT CHANGE POSITION */
-  uint16_t fpu_state_offset;   /* +16 SHOULD NOT CHANGE POSITION */
+  uint64_t fpu_state_offset;   /* +16 SHOULD NOT CHANGE POSITION */
   
   nk_stack_size_t stack_size;
     

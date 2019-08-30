@@ -106,6 +106,7 @@ ENTRY(nk_fiber_fork)
     movq $-1, %rdx
 
     /* align stack to 64 bytes */
+    subq $0x1000, %rsp
     andq $-1024, %rsp
 
     /* place new stack ptr into 2nd argument register */
@@ -113,9 +114,6 @@ ENTRY(nk_fiber_fork)
 
     /* Save FPRs onto stack with xsave */
     XSAVE 0x0(%rsp)
-
-    /* TODO MAC: Find out real FPR save size! */
-    subq $0x1000, %rsp
 
     #endif
 
@@ -149,6 +147,7 @@ ENTRY(new_nk_fiber_yield)
     movq $-1, %rdx
 
     /* align stack to 64 bytes */
+    subq $0x1000, %rsp
     andq $-1024, %rsp
 
     /* place new stack ptr into 2nd argument register */
@@ -166,7 +165,7 @@ ENTRY(__nk_fiber_context_switch)
     #if NAUT_CONFIG_FIBER_FSAVE
 
     /* Grab position of FPRs from fiber struct */
-    movq 0x16(%rdi), %rsp
+    movq 0x10(%rdi), %rsp
 
     /* move -1 into rax and rdx to restore all FPRs */
     movq $-1, %rax
@@ -213,6 +212,7 @@ ENTRY(new_nk_fiber_yield_to)
     movq $-1, %rdx
 
     /* align stack to 64 bytes */
+    subq $0x1000, %rsp
     andq $-1024, %rsp
 
     /* place new stack ptr into 3rd argument register */
@@ -239,6 +239,7 @@ ENTRY(_new_nk_fiber_join_yield)
     movq $-1, %rdx
 
     /* align stack to 64 bytes */
+    subq $0x1000, %rsp
     andq $-1024, %rsp
 
     /* place new stack ptr into 2nd argument register */
@@ -254,18 +255,19 @@ ENTRY(_new_nk_fiber_join_yield)
 
 #if NAUT_CONFIG_FIBER_FSAVE
 ENTRY(_nk_fiber_fp_save)
-    //pushq %rax
-    //pushq %rdx
-    //pushq %rsi
-    movq 0x0(%rdi), %rsi
-    andq $-1024, %rsi
-    movq %rsi, 0x16(%rdi)
+    pushq %rax
+    pushq %rdx
+    pushq %r15
+    movq 0x0(%rdi), %r15
     movq $-1, %rax
     movq $-1, %rdx
-	XSAVE (%rsi)
-    //popq %rsi
-    //popq %rdx
-    //popq %rax
+    subq $0x1000, %r15
+    andq $-1024, %r15
+    XSAVE 0x0(%r15)
+    movq %r15, 0x10(%rdi)
+    popq %r15
+    popq %rdx
+    popq %rax
 	ret
 #endif
 

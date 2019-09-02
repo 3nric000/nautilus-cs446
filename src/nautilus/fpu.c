@@ -360,52 +360,6 @@ enable_xsave (void)
      
 }
 
-/* MAC TODO: Might not be needed */
-
-static void
-enable_avx (void)
-{
-    /* Writes 1 into XCR0[2] to indicate XSAVE should save AVX Registers */
-    asm volatile ("pushq %%rax;"
-            "pushq %%rcx;"
-            "pushq %%rdx;"
-            "xor %%rcx, %%rcx;"
-            "xor %%rax, %%rax;"
-            "xor %%rdx, %%rdx;"
-            "xgetbv ;"
-            "or %%eax,0x4 ;"
-            "xsetbv ;"
-            "popq %%rdx ;"
-            "popq %%rcx ;"
-            "popq %%rax ;"
-            :
-            :
-            : "memory");
-}
-
-static void
-enable_avx512f (void)
-{
-    /* Writes 1 into XCR0[5:7] to indicate XSAVE should save AVX512 Registers */
-    asm volatile ("pushq %%rax;"
-            "pushq %%rcx;"
-            "pushq %%rdx;"
-            "xor %%rcx, %%rcx;"
-            "xor %%rax, %%rax;"
-            "xor %%rdx, %%rdx;"
-            "xgetbv ;"
-            "or %%eax,0xe0 ;"
-            "xsetbv ;"
-            "popq %%rdx ;"
-            "popq %%rcx ;"
-            "popq %%rax ;"
-            :
-            :
-            : "memory");
-}
-
-
-
 static void 
 amd_fpu_init (struct naut_info * naut)
 {
@@ -532,14 +486,13 @@ fpu_init_common (struct naut_info * naut)
     /* Does processor have AVX2 registers? */
     if (avx2_ready) {
         FPU_DEBUG("\tInitializing AVX2 support\n");
-        //enable_avx2();
     }
 
     #ifdef NAUT_CONFIG_AVX512F_SUPPORT
     // Does processor have AVX512f registers?
     if (avx512f_ready) {
         /* Can only enable AVX512f if processor has SSE and AVX support */
-        if (sse_ready >= 7 && avx_ready) {
+        if (xsave_support >= 7 && avx_ready) {
             FPU_DEBUG("\tInitializing AVX512f support\n");
             xsave_support |= 0xe0;
         }
@@ -550,11 +503,9 @@ fpu_init_common (struct naut_info * naut)
     /* Configure XSAVE Support */
     if(xsave_ready) {
     xsave_support &= get_xsave_features();
-    asm volatile ("pushq %%rcx ;"
-                "xor %%rcx, %%rcx ;"
+    asm volatile ("xor %%rcx, %%rcx ;"
                 "xsetbv ;"
-                "popq %%rcx ;"
-                 : : : "memory");
+                 : : "a"(xsave_support) : "rcx", "memory");
     }
     #endif
 }

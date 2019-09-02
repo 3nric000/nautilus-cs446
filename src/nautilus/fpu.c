@@ -548,12 +548,14 @@ fpu_init_common (struct naut_info * naut)
     
     #ifdef NAUT_CONFIG_XSAVE
     /* Configure XSAVE Support */
+    if(xsave_ready) {
     xsave_support &= get_xsave_features();
     asm volatile ("pushq %%rcx ;"
                 "xor %%rcx, %%rcx ;"
                 "xsetbv ;"
                 "popq %%rcx ;"
-                 : : : "memory");     
+                 : : : "memory");
+    }
     #endif
 }
 

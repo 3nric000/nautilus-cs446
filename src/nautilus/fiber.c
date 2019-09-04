@@ -346,7 +346,7 @@ static void _nk_fiber_init(nk_fiber_t *f)
 
 #endif
 
-// Helper function called by nk_fiber_yield and nk_fiber_yield_to
+// Helper function called by C portions of nk_fiber_yield and nk_fiber_yield_to.
 // Sets up the context switch between f_from and f_to
 __attribute__((noreturn)) static void _nk_fiber_yield_helper(nk_fiber_t *f_to, fiber_state *state, nk_fiber_t* f_from)
 {
@@ -986,13 +986,15 @@ int nk_fiber_start(nk_fiber_fun_t fun,
 /* 
  * _nk_fiber_yield
  *
- * General purpose yield function. Will yield execution from current fiber to randomly selected fiber.
+ * C portion of general purpose yield function. Yields execution to a randomly selected fiber.
  * Calls to yield will first enter through assembly stub found in src/asm/fiber_lowlevel.S. They will
  * then jump into this C code to perform the remainder of the yield function.
  *
- * @rsp: New stack pointer to be saved into curr_fiber. Will be passed from stub.
- * @offset: Placement of FP state on stack. Passed from assembly stub.
- *
+ * ***** ALL PASSED FROM ASSEMBLY STUB *****
+ * @rsp: New stack pointer to be saved into curr_fiber.
+ * @offset: Placement of FP state on stack.
+ * 
+ * ***** "Returns" by overwriting RAX on fiber's stack *****
  * on error (called outside fiber thread), returns -1.
  * on special case (idle fiber yield and no fiber available), returns 1
  * otherwise, returns 0.
@@ -1051,18 +1053,19 @@ __attribute__((noreturn)) void _nk_fiber_yield(uint64_t rsp, uint64_t offset)
  * Will yield execution from current fiber to f_to. Actual yield_to stub implemented in assembly. Stub
  * will pass rsp and offset to C code to be saved into fiber struct.
  *
+ * ***** ALL PASSED FROM ASSEMBLY STUB *****
  * @f_to: the fiber to yield execution to
  * @earlyRetFlag: whether to return early if f_to is not available. 
  *                YIELD_TO_EARLY_RET => don't yield to rand fiber if f_to unavailable
  *                Any other int => yield to random fiber fiber if f_to unavailable
- * @offset: Location of floating point state saved on stack. Passed by assembly stub.
- * @rsp: Stack pointer of fiber stack. Passed by assembly stub.
+ * @offset: Location of floating point state saved on stack.
+ * @rsp: Stack pointer of fiber stack.
  *
+ * ***** "Returns" by overwriting RAX on fiber's stack *****
  * on early return case, returns -1.
  * if f_to could not be yielded to (rand fiber was yielded to instead), returns 1.
  * on successful yield to f_to, returns 0.
  */
-// rsp and offset are flipped becuase of issues caused by FPR saving
 __attribute__((noreturn)) void _nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag, uint64_t offset, uint64_t rsp)
 {
   // Updates f_to's stack info

@@ -64,25 +64,6 @@
 .code64
 
 
-ENTRY(_nk_fiber_context_switch)
-    // Saves GPRs of fiber we're switching away from
-    // Saves them onto current stack
-    FIBER_SAVE_GPRS()
-//    SAVE_FPRS()
-    
-    // puts new %rsp value into f_from's stack ptr
-    movq %rsp, 0x0(%rdi)
-
-    // switches to the stack of the fiber we're switching to
-    movq 0x0(%rsi), %rsp
-    
-    // Restores registers from new stack
-    FIBER_RESTORE_GPRS()
-//    RESTORE_FPRS()
-    
-    // brings us back to new fiber's routine
-    retq
-
 // We don't care about saving old fiber's stack since it's exiting
 // We simply switch to the new fiber's stack and ret to it's routine
 ENTRY(_nk_exit_switch)
@@ -133,7 +114,7 @@ ENTRY(_nk_fiber_fork_exit)
 
 /******* New ASM stubs *******/
 
-ENTRY(new_nk_fiber_yield)
+ENTRY(nk_fiber_yield)
     /* Push all GPRs onto stack */
     FIBER_SAVE_GPRS()
 
@@ -159,9 +140,9 @@ ENTRY(new_nk_fiber_yield)
     #endif
     
     /* call into C code to perform yield internals */
-    callq __nk_fiber_yield 
+    callq _nk_fiber_yield 
 
-ENTRY(__nk_fiber_context_switch)
+ENTRY(_nk_fiber_context_switch)
     #if NAUT_CONFIG_FIBER_FSAVE
 
     /* Grab position of FPRs from fiber struct */
@@ -185,7 +166,7 @@ ENTRY(__nk_fiber_context_switch)
     /* return to new fiber's last instruction */
     retq
 
-ENTRY(__nk_fiber_context_switch_early)
+ENTRY(_nk_fiber_context_switch_early)
     // No need to restore FPRs, they didn't get changed
 
     // changes stack ptr to new fiber's stack
@@ -197,7 +178,7 @@ ENTRY(__nk_fiber_context_switch_early)
     // return to new fiber's last instruction
     retq
 
-ENTRY(new_nk_fiber_yield_to)
+ENTRY(nk_fiber_yield_to)
     // Push all GPRs onto stack
     FIBER_SAVE_GPRS()
 
@@ -223,9 +204,9 @@ ENTRY(new_nk_fiber_yield_to)
 
     #endif
 
-    callq _new_nk_fiber_yield_to
+    callq _nk_fiber_yield_to
 
-ENTRY(_new_nk_fiber_join_yield)
+ENTRY(_nk_fiber_join_yield)
     // Push all GPRs onto stack
     FIBER_SAVE_GPRS()
 
@@ -251,7 +232,7 @@ ENTRY(_new_nk_fiber_join_yield)
     #endif
     
     // call into C code to perform yield internals
-    callq __new_nk_fiber_join_yield
+    callq __nk_fiber_join_yield
 
 #if NAUT_CONFIG_FIBER_FSAVE
 ENTRY(_nk_fiber_fp_save)

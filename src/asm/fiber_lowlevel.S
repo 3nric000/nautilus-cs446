@@ -141,6 +141,7 @@ ENTRY(nk_fiber_yield)
     
     /* call into C code to perform yield internals */
     callq _nk_fiber_yield 
+    /* This never returns, so not ret required*/
 
 ENTRY(_nk_fiber_context_switch)
     #if NAUT_CONFIG_FIBER_FSAVE
@@ -205,6 +206,7 @@ ENTRY(nk_fiber_yield_to)
     #endif
 
     callq _nk_fiber_yield_to
+    /* This never returns, so not ret required*/
 
 ENTRY(_nk_fiber_join_yield)
     // Push all GPRs onto stack
@@ -233,6 +235,7 @@ ENTRY(_nk_fiber_join_yield)
     
     // call into C code to perform yield internals
     callq __nk_fiber_join_yield
+    /* This never returns, so not ret required*/
 
 #if NAUT_CONFIG_FIBER_FSAVE
 ENTRY(_nk_fiber_fp_save)
@@ -251,6 +254,9 @@ ENTRY(_nk_fiber_fp_save)
     popq %rax
 	ret
 #endif
+
+
+/* Code from old implementation of yield (for later reference) */
 
 /*
 ENTRY(_nk_fiber_context_switch)

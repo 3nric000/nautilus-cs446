@@ -40,6 +40,10 @@
 #include <dev/ioapic.h>
 #include <dev/apic.h>
 
+#ifdef NAUT_CONFIG_FIBER_ENABLE
+#include <nautilus/fiber.h>
+#endif
+
 #ifdef NAUT_CONFIG_ENABLE_REMOTE_DEBUGGING 
 #include <nautilus/gdb-stub.h>
 #endif

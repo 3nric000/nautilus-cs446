@@ -452,7 +452,6 @@ __attribute__((noreturn)) void __nk_fiber_join_yield(uint64_t rsp, uint64_t offs
   
   // Tells compiler this point is unreachable, stops compiler warning
   __builtin_unreachable();
-
 } 
 
 // Cleans up forked fibers since they do not get cleaned up by _fiber_wrapper
@@ -543,14 +542,14 @@ static int _check_yield_to(nk_fiber_t *to_del) {
   }
 }
 
-// sets up fiber state on initial CPU
+// sets up fiber state for current CPU
 static struct nk_fiber_percpu_state *init_local_fiber_state()
 {
     struct nk_fiber_percpu_state *state = (struct nk_fiber_percpu_state*)malloc_specific(sizeof(struct nk_fiber_percpu_state), my_cpu_id());
     
     if (!state) {
         ERROR("Could not allocate fiber state\n");
-	goto fail_free;
+	    goto fail_free;
     }
 	
 	memset(state, 0, sizeof(struct nk_fiber_percpu_state));
@@ -571,7 +570,7 @@ static struct nk_fiber_percpu_state *init_local_fiber_state()
     return 0;
 }
 
-// Sets up fiber state on all CPUs
+// Sets up fiber state on all APs
 int nk_fiber_init_ap ()
 {
     cpu_id_t id = my_cpu_id();
@@ -581,8 +580,8 @@ int nk_fiber_init_ap ()
     
     my_cpu->f_state = init_local_fiber_state();
     if (!(my_cpu->f_state)) { 
-	ERROR("Could not intialize fiber thread\n");
-	return -1;
+	    ERROR("Could not intialize fiber thread\n");
+	    return -1;
     }
 
     return 0;
@@ -597,8 +596,8 @@ int nk_fiber_init()
 
     my_cpu->f_state = init_local_fiber_state();
     if (!(my_cpu->f_state)) { 
-	ERROR("Could not intialize fiber thread\n");
-	return -1;
+	    ERROR("Could not intialize fiber thread\n");
+	    return -1;
     }
 
     return 0;
@@ -607,8 +606,8 @@ int nk_fiber_init()
 // Utility function used to determine if fiber thread should sleep or not
 static int _check_empty(void *s) 
 {
-fiber_state *state = (fiber_state*)s;
-return (!(list_empty(&(state->f_sched_queue)) && state->curr_fiber->is_idle));
+  fiber_state *state = (fiber_state*)s;
+  return (!(list_empty(&(state->f_sched_queue)) && state->curr_fiber->is_idle));
 }
 
 // The idle fiber has different behavior depending on those chosen Kconfig option.
@@ -635,9 +634,9 @@ static void __nk_fiber_idle(void *in, void **out)
     }
     #endif
     
-    // If we have fiber thread wait unabled
-    // Instead of sleep, add thread to wait queue and get woken
-    // up when nk_fiber_run is called
+    // If we have fiber thread wait enabled
+    // Instead of sleep, have thread sleep on per cpu fiber state wait queue
+    // wakes up when nk_fiber_run is called
     #ifdef NAUT_CONFIG_FIBER_ENABLE_WAIT
     nk_fiber_yield();
     fiber_state *state = _GET_FIBER_STATE();
@@ -658,7 +657,7 @@ static void __fiber_thread(void *in, void **out)
     return;
   }
 
-  //TODO: Figure out if these constraints are right for fibers
+  //TODO: Make these options configurable with Kconfig
   struct nk_sched_constraints c = { .type=APERIODIC,
             .interrupt_priority_class=0x0, 
             .aperiodic.priority=NAUT_CONFIG_FIBER_THREAD_PRIORITY };
@@ -671,8 +670,6 @@ static void __fiber_thread(void *in, void **out)
 
   
   // TODO: Associate fiber thread to console thread (somehow) 
-  // Look at vc.h
-  //get_cur_thread()->vc = get_cur_thread()->parent->vc;
 
   // Fetch and update fiber state 
   fiber_state *state = _GET_FIBER_STATE();
@@ -699,9 +696,8 @@ static void __fiber_thread(void *in, void **out)
   // Updating current cpu info
   idle_fiber_ptr->curr_cpu = my_cpu_id();
 
-  //TODO MAC: Remove when you're done testing FPU stuff
-
-  #if NAUT_CONFIG_DEBUG_FPU
+  // For FPU Debugging, prints Xsave configuration
+  #if (0 && defined(NAUT_CONFIG_DEBUG_FPU))
   uint64_t eax;
   uint64_t edx;
 
@@ -745,9 +741,9 @@ void nk_fiber_startup()
     struct cpu *my_cpu = get_cpu();
     FIBER_INFO("Starting fiber thread for CPU %d\n",my_cpu->id);
     if (__start_fiber_thread_for_this_cpu()){
-	ERROR("Cannot start fiber thread for CPU!\n");
-	panic("Cannot start fiber thread for CPU!\n");
-	return;
+	    ERROR("Cannot start fiber thread for CPU!\n");
+	    panic("Cannot start fiber thread for CPU!\n");
+	    return;
     }
 }
 
@@ -776,7 +772,7 @@ static uint64_t rdtsc_time = 0;
 static uint64_t data[10000];
 static int a = 0;
 
-int wrapper_nk_fiber_yield()
+int _wrapper_nk_fiber_yield()
 {
 // nk_vc_printf("wrapper_nk_fiber_yield : running\n");
   uint64_t curr_time = rdtsc();
@@ -786,7 +782,7 @@ int wrapper_nk_fiber_yield()
   a++; 
   return nk_fiber_yield();
 }
-void print_data()
+void _nk_fiber_print_data()
 {
   int i;
   for (i = 0; i < a; i++) {
@@ -849,7 +845,6 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   // Check if malloc for nk_fiber_t struct failed
   if (!fiber) {
     // Print error here
-    //panic("nk_fiber_create() : Malloc failed. Unable to create fiber.\n");
     return -EINVAL;
   }
 
@@ -869,7 +864,6 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   if (!fiber->stack){
     // Free the previously allocated nk_fiber_t
     free(fiber);
-    //panic("nk_fiber_create() : Malloc failed. Unable to create fiber.\n");
     return -EINVAL;
   }
 
@@ -1031,7 +1025,6 @@ __attribute__((noreturn)) void _nk_fiber_yield(uint64_t rsp, uint64_t offset)
     // Abort yield somehow. Subtract from RSP and retq?
     *(uint64_t*)(rsp+GPR_RAX_OFFSET) = -1; 
     _nk_fiber_context_switch(curr_fiber);
-    //panic("Called yield from outside fiber thread\n");
   }
   
   // Pick a random fiber to yield to (NULL if no fiber in queue)
@@ -1051,7 +1044,6 @@ __attribute__((noreturn)) void _nk_fiber_yield(uint64_t rsp, uint64_t offset)
     if (curr_fiber->is_idle) {
       //Abort yield somehow? Subtract from RSP and retq?
       *(uint64_t*)(rsp+GPR_RAX_OFFSET) = 1; 
-      //_nk_fiber_context_switch_early(curr_fiber);
       _nk_fiber_context_switch(curr_fiber);
     } else {
         f_to = state->idle_fiber;
@@ -1119,7 +1111,6 @@ __attribute__((noreturn)) void _nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRet
       if (curr_fiber->is_idle) { /* if no fiber to sched and curr idle, no reason to switch */
         *(uint64_t*)(rsp+GPR_RAX_OFFSET) = 0;
         _nk_fiber_context_switch_early(curr_fiber);
-        //FIBER_INFO("nk_fiber_yield() : yield aborted. Returning 0\n");
       } else { /* if no fiber to sched and not currenty in idle fiber, switch to idle fiber */
           new_to = state->idle_fiber;
       }
@@ -1236,7 +1227,7 @@ int nk_fiber_join(nk_fiber_t *wait_on)
  * can be saved before any modifications can be made to them.
  *
  * On success, parent gets child's fiber ptr, child gets 0
- * On failure, parent gets (nk_fiber_t*)-EINVAL;
+ * On failure, parent gets (nk_fiber_t*)-1;
  *
  */
 nk_fiber_t *__nk_fiber_fork(uint64_t rsp0, uint64_t offset)
@@ -1300,7 +1291,7 @@ nk_fiber_t *__nk_fiber_fork(uint64_t rsp0, uint64_t offset)
   nk_fiber_create(NULL, NULL, 0, alloc_size, &new);
   if (!new) {
     //panic("__nk_fiber_fork() : could not allocate new fiber. Fork failed.\n");
-    return (nk_fiber_t*)-EINVAL;
+    return (nk_fiber_t*)-1;
   }
   child_stack = new->stack;
 
@@ -1380,7 +1371,7 @@ nk_fiber_t *__nk_fiber_fork(uint64_t rsp0, uint64_t offset)
   if (nk_fiber_run(new, state->fork_cpu) < 0) {
     free(new->stack);
     free(new);
-    return (nk_fiber_t*)-EINVAL;
+    return (nk_fiber_t*)-1;
   } 
 
   return new;
@@ -1391,7 +1382,7 @@ nk_fiber_t *__nk_fiber_fork(uint64_t rsp0, uint64_t offset)
  *
  * Changes the current fiber's vc to the specified vc
  *
- * vc: the virtual console to change to
+ * @vc: the virtual console to change to
  *
  */
 void nk_fiber_set_vc(struct nk_virtual_console *vc)

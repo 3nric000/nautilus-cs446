@@ -454,6 +454,7 @@ fpu_init_common (struct naut_info * naut)
     if (xsave_ready) {
         FPU_DEBUG("\tInitializing XSAVE instructions\n");
         enable_xsave();
+        /* x87 support is non-optional if xsave enabled */
         xsave_support |= 0x1;
     }
     #endif
@@ -481,8 +482,6 @@ fpu_init_common (struct naut_info * naut)
     }
     #endif
 
-    // MAC TODO: Find out if avx2 "enable" is necessary
-    
     /* Does processor have AVX2 registers? */
     if (avx2_ready) {
         FPU_DEBUG("\tInitializing AVX2 support\n");
@@ -494,6 +493,7 @@ fpu_init_common (struct naut_info * naut)
         /* Can only enable AVX512f if processor has SSE and AVX support */
         if (xsave_support >= 7 && avx_ready) {
             FPU_DEBUG("\tInitializing AVX512f support\n");
+            /* Bits correspond to AVX512 opmasks, top half of lower ZMM regs, and upper ZMM regs */
             xsave_support |= 0xe0;
         }
     }
@@ -501,11 +501,11 @@ fpu_init_common (struct naut_info * naut)
     
     #ifdef NAUT_CONFIG_XSAVE_SUPPORT
     /* Configure XSAVE Support */
-    if(xsave_ready) {
-    xsave_support &= get_xsave_features();
-    asm volatile ("xor %%rcx, %%rcx ;"
-                "xsetbv ;"
-                 : : "a"(xsave_support) : "rcx", "memory");
+    if (xsave_ready) {
+        xsave_support &= get_xsave_features();
+        asm volatile ("xor %%rcx, %%rcx ;"
+                      "xsetbv ;"
+                      : : "a"(xsave_support) : "rcx", "memory");
     }
     #endif
 }

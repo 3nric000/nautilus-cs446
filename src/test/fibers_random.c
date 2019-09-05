@@ -132,13 +132,13 @@ handle_fibers2(char * buf, void * priv)
 /******************* Shell Structs ********************/
 
 static struct shell_cmd_impl fibers_impl1 = {
-  .cmd      = "instrument1",
+  .cmd      = "fiberrandom1",
   .help_str = "Simple compiler instrumentation test 1",
   .handler  = handle_fibers1,
 };
 
 static struct shell_cmd_impl fibers_impl2 = {
-  .cmd      = "instrument2",
+  .cmd      = "fiberrandom2",
   .help_str = "Simple compiler instrumentation test 2",
   .handler  = handle_fibers2,
 };

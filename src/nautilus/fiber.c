@@ -88,11 +88,11 @@ extern void _nk_fiber_context_switch_early(nk_fiber_t* f_to);
 extern void _nk_exit_switch(nk_fiber_t *next);
 extern nk_fiber_t *nk_fiber_fork();
 extern int _nk_fiber_fork_exit(nk_fiber_t *curr);
+extern int _nk_fiber_join_yield();
 
-/* Assembly stubs for yield functions */
+/* Assembly stubs for yield functions. Users use these functions to perform context switches */
 extern int nk_fiber_yield();
 extern int nk_fiber_yield_to(nk_fiber_t* f_to, int earlyRetFlag);
-extern int _nk_fiber_join_yield();
 
 #if NAUT_CONFIG_FIBER_FSAVE
 extern void _nk_fiber_fp_save(nk_fiber_t* f);
@@ -272,13 +272,18 @@ static void _fiber_wrapper(nk_fiber_t* f_to)
  *|           .            |
  *|  Remaining dummy GPRs  |
  *|________________________|
+ *|                        |
+ *|   Initial FPR Values   |
+ *| *only included if FPR  |
+ *|   saving is enabled*   |
+ *|________________________|
  *
  * Order of GPRs can be found in include/nautilus/fiber.h
  * All values except %rdi are dummy values when debug enabled.
  * All values except %rdi are 0 when debugging not enabled.
  * %rdi's stack position will contain ptr to fiber (stack ptr).
  * We use this setup in context switch assembly code
- * to help us switch stacks.
+ * to help us switch stacks and start the fiber.
  *
  * We pop these values off the stack and ptr to fiber
  * will go into %rdi which is first argument register. We
@@ -400,7 +405,10 @@ __attribute__((noreturn)) static void _nk_fiber_yield_helper(nk_fiber_t *f_to, f
   __builtin_unreachable();
 }
 
-// Used to switch away from a fiber that was just placed on a wait queue
+// C portion of function sed to switch away from a fiber that was just placed on a wait queue
+// This function is called from an assembly stub, _nk_fiber_join_yield, that is implemented
+// in src/asm/fiber_lowlevel.S. This is similar to _nk_fiber_yield and _nk_fiber_yield_to, 
+// except the user will never call this function (or _nk_fiber_join_yield) on their own.
 __attribute__((noreturn)) void __nk_fiber_join_yield(uint64_t rsp, uint64_t offset)
 {
   // Gets current state that will be needed throughout function
@@ -446,6 +454,7 @@ __attribute__((noreturn)) void __nk_fiber_join_yield(uint64_t rsp, uint64_t offs
   __builtin_unreachable();
 
 } 
+
 // Cleans up forked fibers since they do not get cleaned up by _fiber_wrapper
 static void _nk_fiber_cleanup()
 {
@@ -464,9 +473,10 @@ static inline uint64_t _get_random()
 }
 
 // If needed, wakes up the fiber thread so fiber routines can be executed
+// Called in nk_fiber_run to ensure fibers placed on queues will be run ASAP.
 static int _wake_fiber_thread(fiber_state *state)
 {
-  #if NAUT_CONFIG_ENABLE_SLEEP
+  #if NAUT_CONFIG_FIBER_ENABLE_SLEEP
   nk_thread_t *curr_thread = state->fiber_thread;
   // Wake up fiber thread if it is sleeping (so it can schedule & run fibers)
   if (curr_thread->timer) {
@@ -479,12 +489,12 @@ static int _wake_fiber_thread(fiber_state *state)
   }
   #endif
 
-  #if NAUT_CONFIG_ENABLE_WAIT 
+  #if NAUT_CONFIG_FIBER_ENABLE_WAIT 
   if (!(list_empty_careful(&(state->waitq->list)))) {
     nk_wait_queue_wake_one_extended(state->waitq, 1);
   }
   #endif
-  // NAUT_CONFIG_ENABLE_SPIN case: No need to wake, so just return 0
+  // NAUT_CONFIG_FIBER_ENABLE_SPIN case: No need to wake, so just return 0
   return 0;
 }
 
@@ -533,7 +543,7 @@ static int _check_yield_to(nk_fiber_t *to_del) {
   }
 }
 
-// sets up fiber state for a CPU
+// sets up fiber state on initial CPU
 static struct nk_fiber_percpu_state *init_local_fiber_state()
 {
     struct nk_fiber_percpu_state *state = (struct nk_fiber_percpu_state*)malloc_specific(sizeof(struct nk_fiber_percpu_state), my_cpu_id());
@@ -578,7 +588,7 @@ int nk_fiber_init_ap ()
     return 0;
 }
 
-// Sets up fiber state on first CPU to boot?
+// Sets up fiber state on first CPU to boot
 int nk_fiber_init() 
 {
     struct cpu * my_cpu = nk_get_nautilus_info()->sys.cpus[nk_get_nautilus_info()->sys.bsp_id];
@@ -601,22 +611,22 @@ fiber_state *state = (fiber_state*)s;
 return (!(list_empty(&(state->f_sched_queue)) && state->curr_fiber->is_idle));
 }
 
-// The idle fiber has different behavior depending on which is chosen in Kconfig.
+// The idle fiber has different behavior depending on those chosen Kconfig option.
 // SPIN: yields continuously (even if there are no fibers to yield to)
 // SLEEP: yields continuously, but will force fiber thread to sleep for set amt. of time if no fibers are avail.
     // nk_fiber_run will wake up fiber_thread if a fiber is added to queue when it is sleeping
-// WAIT: yields continuously, but will put fiber thread on a wait queue if no fibers are available
+// WAIT: yields continuously, but will put fiber thread onto wait queue if no fibers are available
     // nk_fiber_run will wake up fiber_thread when a fiber is added to the queue
 static void __nk_fiber_idle(void *in, void **out)
 {
   while (1) {
     // If we have fiber thread spin enabled
-    #ifdef NAUT_CONFIG_ENABLE_SPIN
+    #ifdef NAUT_CONFIG_FIBER_ENABLE_SPIN
     nk_fiber_yield();
     #endif
 
     // If we have fiber thread sleep enabled
-    #ifdef NAUT_CONFIG_ENABLE_SLEEP  
+    #ifdef NAUT_CONFIG_FIBER_ENABLE_SLEEP  
     nk_fiber_yield();
     if (list_empty_careful(_GET_SCHED_HEAD())){
       FIBER_DEBUG("nk_fiber_idle() : fiber thread going to sleep\n");
@@ -628,7 +638,7 @@ static void __nk_fiber_idle(void *in, void **out)
     // If we have fiber thread wait unabled
     // Instead of sleep, add thread to wait queue and get woken
     // up when nk_fiber_run is called
-    #ifdef NAUT_CONFIG_ENABLE_WAIT
+    #ifdef NAUT_CONFIG_FIBER_ENABLE_WAIT
     nk_fiber_yield();
     fiber_state *state = _GET_FIBER_STATE();
     if (!(_check_empty((void*)state))){
@@ -660,7 +670,7 @@ static void __fiber_thread(void *in, void **out)
   }
 
   
-  // TODO MAC: Associate fiber thread to console thread (somehow) 
+  // TODO: Associate fiber thread to console thread (somehow) 
   // Look at vc.h
   //get_cur_thread()->vc = get_cur_thread()->parent->vc;
 
@@ -689,7 +699,9 @@ static void __fiber_thread(void *in, void **out)
   // Updating current cpu info
   idle_fiber_ptr->curr_cpu = my_cpu_id();
 
-/* TODO MAC: Remove when you're done testing FPU stuff 
+  //TODO MAC: Remove when you're done testing FPU stuff
+
+  #if NAUT_CONFIG_DEBUG_FPU
   uint64_t eax;
   uint64_t edx;
 
@@ -706,7 +718,8 @@ static void __fiber_thread(void *in, void **out)
                  : [result1]"=m" (eax), [result2] "=m" (edx) : : "memory");
       
   FIBER_INFO("The cr0 features are eax: %d and edx: %d\n", eax, edx);
-*/
+
+  #endif
 
   // Starting the idle fiber with fiber wrapper (so it isn't added to the queue)
   _fiber_wrapper(idle_fiber_ptr);
@@ -884,8 +897,9 @@ int nk_fiber_create(nk_fiber_fun_t fun,
   // Initializes wait queue
   INIT_LIST_HEAD(&(fiber->wait_queue)); 
   INIT_LIST_HEAD(&(fiber->wait_node)); 
-  
-  // Initializes child fiber list TODO: Not used yet
+ 
+  //TODO: Not used yet 
+  // Initializes child fiber list 
   INIT_LIST_HEAD(&(fiber->fiber_children));
   INIT_LIST_HEAD(&(fiber->child_node));
 
@@ -984,17 +998,18 @@ int nk_fiber_start(nk_fiber_fun_t fun,
 }
 
 /* 
- * _nk_fiber_yield
+ * _nk_fiber_yield (NOTE THAT THIS ISN'T CALLED DIRECTLY! Users call nk_fiber_yield())
  *
  * C portion of general purpose yield function. Yields execution to a randomly selected fiber.
  * Calls to yield will first enter through assembly stub found in src/asm/fiber_lowlevel.S. They will
- * then jump into this C code to perform the remainder of the yield function.
+ * then jump into this C code to perform part of the yield and call a yield _nk_fiber_yield_helper().
  *
  * ***** ALL PASSED FROM ASSEMBLY STUB *****
  * @rsp: New stack pointer to be saved into curr_fiber.
  * @offset: Placement of FP state on stack.
  * 
- * ***** "Returns" by overwriting RAX on fiber's stack *****
+ *
+ * ***** "Returns" by overwriting RAX on the fiber's stack *****
  * on error (called outside fiber thread), returns -1.
  * on special case (idle fiber yield and no fiber available), returns 1
  * otherwise, returns 0.
@@ -1048,10 +1063,12 @@ __attribute__((noreturn)) void _nk_fiber_yield(uint64_t rsp, uint64_t offset)
 }
 
 /* 
- * _nk_fiber_yield_to
+ * _nk_fiber_yield_to (NOTE THAT THIS ISN'T CALLED DIRECTLY! Users call nk_fiber_yield_to())
  *
- * Will yield execution from current fiber to f_to. Actual yield_to stub implemented in assembly. Stub
- * will pass rsp and offset to C code to be saved into fiber struct.
+ * C portion of yield_to funciton. Will yield execution from current fiber to f_to. Calls
+ * to nk_fiber_yield_to will first enter through assembly stub found in src/asm/fiber_lowlevel.S.
+ * Stub will pass rsp and offset to this C code to be saved into fiber struct. This function then
+ * performs part of yield and then calls _nk_fiber_yield_to() to help perform context switch. 
  *
  * ***** ALL PASSED FROM ASSEMBLY STUB *****
  * @f_to: the fiber to yield execution to

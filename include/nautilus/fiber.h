@@ -140,24 +140,25 @@ int nk_fiber_yield();
 // returns 1 if the fiber does not yield, otherwise returns ret value of nk_fiber_yield 
 int nk_fiber_conditional_yield(uint8_t (*cond_function)(void *param), void *state);
 
-// Yield that allows choice of fiber to
+// Yield that allows choice of which fiber to yield to (f_to).
 // if earlyRetFlag == YIELD_TO_EARLY_RET => fiber will not yield if f_to not available
 // else, fiber will yield to random fiber when f_to not available to switch to
 // returns -1 on early ret, 1 on yield to rand fiber, 0 on yield to f_to
 int nk_fiber_yield_to(nk_fiber_t *f_to, int earlyRetFlag);
 
 // Takes a fiber to yield to, earlyRetFlag, a condition to yield on, and a function to check that condition
-// returns -1 if the fiber does not yield, otherwise returns ret value of nk_fiber_yield_to
+// returns -1 if the fiber does not yield, otherwise returns ret value of nk_fiber_yield_to(f_to, earlyRetFlag)
 int nk_fiber_conditional_yield_to(nk_fiber_t *f_to, int earlyRetFlag, uint8_t (*cond_function)(void *param), void *state);
 
-// fork the current fiber 
-//   - fiber address of child returned to parent
-//   - 0 is returned to child
-//   - child runs until it returns from the 
-//     current function, which returns into
-//     the fiber cleanup function instead of
-//     to the caller
-// on error, parent is returned (nk_fiber_t*)-EINVAL
+/* fork the current fiber 
+*   - fiber address of child returned to parent
+*   - 0 is returned to child
+*   - child runs until it returns from the 
+*     current function, which returns into
+*     the fiber cleanup function instead of
+*     to the caller
+*  on error, parent is returned (nk_fiber_t*)-EINVAL
+*/
 nk_fiber_t *nk_fiber_fork();
 
 // Causes the currently running fiber to wait on the specified fiber's wait queue (waits until that fiber exits) 
